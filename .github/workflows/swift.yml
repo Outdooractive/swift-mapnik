@@ -17,7 +17,7 @@ jobs:
     # first test (Swift Testing parallel executor produces no output); cap
     # the job so a stuck run fails fast instead of burning the 6-hour
     # runner limit.
-    timeout-minutes: 30
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -55,4 +55,6 @@ jobs:
       run: CC=clang CXX=clang++ swift build
 
     - name: Test
-      run: CC=clang CXX=clang++ swift test
+      # --no-parallel: Swift Testing's parallel executor hung with no output
+      # before the first test on the macOS runner with Swift 6.3.3.
+      run: CC=clang CXX=clang++ swift test --no-parallel
