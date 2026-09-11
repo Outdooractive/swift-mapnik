@@ -40,7 +40,11 @@ jobs:
 
     - name: Install mapnik (macOS)
       if: runner.os == 'macOS'
-      run: brew install mapnik
+      # The mapnik formula does not ship fonts; the DejaVu cask provides the
+      # "DejaVu Sans Book" face the test stylesheets reference.
+      run: |
+        brew install mapnik
+        brew install --cask font-dejavu-sans
 
     - name: Cache SwiftPM build
       uses: actions/cache@v4
