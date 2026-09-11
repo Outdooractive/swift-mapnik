@@ -40,7 +40,16 @@ let package = Package(
                     "-L/usr/lib",
                     "-L/usr/local/lib",
                 ], .when(platforms: [.linux])),
-                .linkedLibrary("mapnik"),
+                // Resolving libmapnik by name (-lmapnik) is broken on
+                // case-insensitive filesystems: SwiftPM's own -L products
+                // dir contains libMapnik.a (the Swift target archive), and
+                // the linker picks it up instead of Homebrew's libmapnik
+                // dylib, leaving every mapnik C++ symbol undefined. Pass
+                // the dylib path explicitly instead.
+                .unsafeFlags([
+                    "/opt/homebrew/lib/libmapnik.dylib",
+                ], .when(platforms: [.macOS])),
+                .linkedLibrary("mapnik", .when(platforms: [.linux])),
                 .linkedLibrary("proj"),
                 .linkedLibrary("icuuc"),
                 .linkedLibrary("icui18n"),

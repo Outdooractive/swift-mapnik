@@ -83,11 +83,27 @@ public enum MapnikConfig {
     }
 
     /// Default font directory for the current platform.
+    ///
+    /// On Linux this is the system-wide font directory. On macOS the
+    /// Homebrew font directory is preferred, but the Homebrew mapnik
+    /// formula does not ship fonts, so the standard macOS font directories
+    /// are used as fallbacks (first existing path wins):
+    ///
+    /// 1. `/opt/homebrew/share/mapnik/fonts`
+    /// 2. `~/Library/Fonts`
+    /// 3. `/Library/Fonts`
+    /// 4. `/System/Library/Fonts`
     public static var defaultFontPath: String? {
         #if os(Linux)
         return "/usr/share/fonts"
         #else
-        return "/opt/homebrew/share/mapnik/fonts"
+        let candidates = [
+            "/opt/homebrew/share/mapnik/fonts",
+            ("~" as NSString).expandingTildeInPath + "/Library/Fonts",
+            "/Library/Fonts",
+            "/System/Library/Fonts",
+        ]
+        return candidates.first { FileManager.default.fileExists(atPath: $0) }
         #endif
     }
 
