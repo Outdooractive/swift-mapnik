@@ -13,6 +13,11 @@ jobs:
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # The macOS test runner has been observed to hang before executing the
+    # first test (Swift Testing parallel executor produces no output); cap
+    # the job so a stuck run fails fast instead of burning the 6-hour
+    # runner limit.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
