@@ -138,6 +138,21 @@ public struct MetatileRendered: Sendable {
     /// Individual `tile` calls still honor their own skip logic.
     public let isFullyTransparent: Bool
 
+    /// The RGBA pixel at (`x`, `y`) within the metatile image (premultiplied,
+    /// `[r, g, b, a]`). Diagnostics/testing helper — not for bulk pixel access.
+    ///
+    /// - Returns: `nil` for out-of-range coordinates.
+    public func pixel(x: Int, y: Int) -> [UInt8]? {
+        guard x >= 0, x < width, y >= 0, y < height else {
+            return nil
+        }
+        let offset = (y * width + x) * 4
+        guard offset + 3 < rgba.count else {
+            return nil
+        }
+        return [rgba[offset], rgba[offset + 1], rgba[offset + 2], rgba[offset + 3]]
+    }
+
     let rgba: Data
     let options: RenderOptions
 
