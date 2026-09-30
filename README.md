@@ -38,7 +38,7 @@ Output formats include PNG (8/24/32-bit, paletted), JPEG, WebP, TIFF and SVG (vi
 
 ## Requirements
 
-This package requires Swift 6.3 or higher and the Mapnik 3.x C++ library with development headers, and compiles on macOS (\>= macOS 15) and Linux. The [GISTools](https://github.com/Outdooractive/gis-tools) dependency is resolved automatically.
+This package requires Swift 6.3 or higher and the Mapnik 3.x or 4.x C++ library with development headers, and compiles on macOS (\>= macOS 15) and Linux. The [GISTools](https://github.com/Outdooractive/gis-tools) dependency is resolved automatically.
 
 ### macOS (Homebrew)
 
@@ -54,7 +54,13 @@ The build expects Homebrew under `/opt/homebrew` (Apple Silicon). Mapnik's datas
 sudo apt install libmapnik-dev mapnik-utils fonts-dejavu-core
 ```
 
-Plugins and fonts are picked up from `/usr/lib/mapnik/3.1/input` and `/usr/share/fonts`. Custom paths can be set via `MapnikConfig.initialize`.
+Plugins and fonts are picked up from `/usr/share/fonts` and a discovered plugin directory, in this order:
+
+1. `pkg-config libmapnik --variable=plugins_dir` — mapnik 4.x packages ship `libmapnik.pc` exposing the plugin directory (e.g. `/usr/lib/<triplet>/mapnik/4.0/input` on Debian/Ubuntu; mapnik 3.1 packages ship no `.pc` file, so this probe fails and the next step applies)
+2. The multiarch glob `/usr/lib/*/mapnik/*/input` — the Debian/Ubuntu mapnik 4.x layout; the highest version wins
+3. The legacy glob `/usr/lib/mapnik/*/input` — the mapnik 3.1 layout on Ubuntu LTS releases (e.g. `/usr/lib/mapnik/3.1/input`)
+
+Custom paths can be set via `MapnikConfig.initialize`.
 
 > Note: SwiftPM on Linux needs a Clang-based C++ toolchain. If your environment forces GCC (`CC`/`CXX`), build with `CC=/usr/bin/clang CXX=/usr/bin/clang++ swift build`.
 
