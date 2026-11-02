@@ -191,6 +191,7 @@ public enum MapnikConfig {
         else {
             return false
         }
+
         let entries = (try? FileManager.default.contentsOfDirectory(atPath: path)) ?? []
         return entries.contains { $0.hasSuffix(".input") }
     }
@@ -251,9 +252,9 @@ public enum MapnikConfig {
     ///   or surface initialization failures).
     public static var defaultPluginPath: String? {
         #if os(Linux)
-        return linuxPluginPath()
+        linuxPluginPath()
         #else
-        return "/opt/homebrew/lib/mapnik/input"
+        "/opt/homebrew/lib/mapnik/input"
         #endif
     }
 

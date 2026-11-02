@@ -332,7 +332,7 @@ struct MapnikTests {
 
         #expect(first != nil)
         #expect(second != nil)
-        #expect(first?.count == second!.count)
+        #expect(try first?.count == #require(second?.count))
     }
 
     @Test
@@ -469,6 +469,50 @@ struct MapnikTests {
         #expect(throws: MapnikError.self) {
             try map.setSRS("")
         }
+    }
+
+    @Test
+    func `zoom rejects a bounding box in a planar projection`() throws {
+        let map = try Mapnik(xml: Fixtures.polygonStyle)
+
+        // A Web Mercator box would be silently read as degrees and produce a
+        // NaN extent.
+        let mercator = BoundingBox(
+            southWest: Coordinate3D(x: 556_597.0, y: 5_942_074.0, projection: .epsg3857),
+            northEast: Coordinate3D(x: 1_669_792.0, y: 6_106_854.0, projection: .epsg3857))
+
+        #expect(throws: MapnikError.self) {
+            try map.zoom(to: mercator)
+        }
+    }
+
+    @Test
+    func `render bounds rejects a bounding box in a planar projection`() throws {
+        let map = try Mapnik(xml: Fixtures.polygonStyle)
+        let mercator = BoundingBox(
+            southWest: Coordinate3D(x: 556_597.0, y: 5_942_074.0, projection: .epsg3857),
+            northEast: Coordinate3D(x: 1_669_792.0, y: 6_106_854.0, projection: .epsg3857))
+
+        #expect(throws: MapnikError.self) {
+            _ = try map.render(bounds: mercator, width: 64, height: 64, format: .png())
+        }
+    }
+
+    @Test
+    func `layer envelope carries the layer projection`() throws {
+        let map = try Mapnik(xml: Fixtures.multiLayerStyle)
+
+        // The fixture's layers are declared as epsg:4326.
+        let envelope = try map.layerEnvelope(0)
+        #expect(envelope.projection == .epsg4326)
+        #expect(map.layerSRS(0) == "epsg:4326")
+    }
+
+    @Test
+    func `layer count matches the stylesheet`() throws {
+        let map = try Mapnik(xml: Fixtures.multiLayerStyle)
+        #expect(map.layerCount == 2)
+        #expect(map.layerNames.count == 2)
     }
 
 }

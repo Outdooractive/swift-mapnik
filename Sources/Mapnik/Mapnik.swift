@@ -715,11 +715,17 @@ public final class Mapnik: @unchecked Sendable {
 
     /// Zooms the map so the given bounding box fits the current dimensions.
     ///
-    /// The box (WGS 84 degrees) is reprojected to the map's SRS first, which
-    /// works for Web Mercator maps as well as for maps with any other
-    /// projection. Note that the map itself is not resized; the box is
-    /// fitted into whatever dimensions the map currently has.
+    /// The box must be in WGS 84 degrees (a box without a projection is
+    /// assumed to be). It is reprojected to the map's SRS, which works for Web
+    /// Mercator maps as well as for maps with any other projection. Note that
+    /// the map itself is not resized; the box is fitted into whatever
+    /// dimensions the map currently has.
+    ///
+    /// - Throws: `MapnikError.invalidInput` if the box is not in geographic
+    ///   coordinates, `MapnikError.renderingFailed` if the reprojection fails.
     public func zoom(to bounds: BoundingBox) throws {
+        try bounds.validateGeographic()
+
         try CErrors.withError(MapnikError.renderingFailed) { errorOut in
             mapnik_map_zoom_to_wgs84_box(
                 map,
@@ -758,15 +764,23 @@ public final class Mapnik: @unchecked Sendable {
 
     // MARK: - Layers
 
+    /// The number of layers defined by the stylesheet.
+    ///
+    /// Unlike ``layerNames``, this is the authoritative count for index-based
+    /// APIs such as ``layerVisible(_:)`` and ``layerSRS(_:)``.
+    public var layerCount: Int {
+        Int(mapnik_map_layer_count(map))
+    }
+
     /// The names of all layers defined by the stylesheet, in render order.
     public var layerNames: [String] {
-        let count = mapnik_map_layer_count(map)
+        let count = layerCount
         guard count > 0 else {
             return []
         }
 
-        return (0 ..< count).compactMap { index in
-            mapnik_map_layer_name(map, Int32(index)).map { String(cString: $0) }
+        return (0 ..< count).map { index in
+            mapnik_map_layer_name(map, Int32(index)).map { String(cString: $0) } ?? ""
         }
     }
 
@@ -796,6 +810,9 @@ public final class Mapnik: @unchecked Sendable {
     ///
     /// The box is in the layer's own SRS (see ``layerSRS(_:)``), as computed
     /// from the layer's datasource — the same value `zoomAll` unions over.
+    /// The returned `BoundingBox` carries that projection when the layer SRS
+    /// is a known EPSG code, so it can be reprojected directly; otherwise it
+    /// is `.noSRID` and the SRS string from ``layerSRS(_:)`` should be used.
     ///
     /// - Parameter index: The layer index, in render order, 0-based.
     /// - Throws: `MapnikError.renderingFailed` when the index is out of
@@ -821,9 +838,32 @@ public final class Mapnik: @unchecked Sendable {
                 errorOut)
         }
 
+        let projection = layerSRS(index).flatMap(Self.projection(matching:)) ?? .noSRID
         return BoundingBox(
-            southWest: Coordinate3D(x: minX, y: minY, projection: .noSRID),
-            northEast: Coordinate3D(x: maxX, y: maxY, projection: .noSRID))
+            southWest: Coordinate3D(x: minX, y: minY, projection: projection),
+            northEast: Coordinate3D(x: maxX, y: maxY, projection: projection))
+    }
+
+    /// Maps a mapnik SRS string to a GISTools `Projection` when it names a
+    /// known EPSG code.
+    static func projection(matching srs: String) -> Projection? {
+        let lowered = srs.lowercased()
+        let digits: Substring? =
+            if let range = lowered.range(of: "epsg:") ?? lowered.range(of: "epsg::") {
+                lowered[range.upperBound...].prefix(while: \.isNumber)
+            }
+            else if let range = lowered.range(of: "init=epsg:") {
+                lowered[range.upperBound...].prefix(while: \.isNumber)
+            }
+            else {
+                nil
+            }
+
+        guard let digits, let srid = Int(digits) else {
+            return nil
+        }
+
+        return Projection(srid: srid)
     }
 
     /// The layer's projection string.
