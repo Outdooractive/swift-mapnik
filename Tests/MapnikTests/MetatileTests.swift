@@ -246,8 +246,8 @@ struct MetatileTests {
     // MARK: - Sequencing
 
     @Test
-    func `metatile sequence yields aligned blocks`() {
-        let sequence = MetatileSequence(
+    func `metatile sequence yields aligned blocks`() throws {
+        let sequence = try MetatileSequence(
             bounds: Fixtures.germany,
             zoomRange: 9 ... 9,
             metaSize: 2)
@@ -263,37 +263,37 @@ struct MetatileTests {
 
         // The tiles of all blocks exactly match the plain tile sequence.
         let fromBlocks = Set(blocks.flatMap(\.tiles))
-        let fromPlain = Set(Array(TileSequence(bounds: Fixtures.germany, zoomRange: 9 ... 9)))
+        let fromPlain = try Set(Array(TileSequence(bounds: Fixtures.germany, zoomRange: 9 ... 9)))
         #expect(fromBlocks == fromPlain)
     }
 
     @Test
-    func `metatile sequence block count`() {
+    func `metatile sequence block count`() throws {
         // Germany at zoom 9 spans x 264..277, y 161..179 (14 × 19 tiles).
         // With metaSize 2 the aligned grid needs 7 × 10 = 70 blocks.
-        let zoom9 = MetatileSequence(bounds: Fixtures.germany, zoomRange: 9 ... 9, metaSize: 2)
+        let zoom9 = try MetatileSequence(bounds: Fixtures.germany, zoomRange: 9 ... 9, metaSize: 2)
         #expect(zoom9.count == 70)
         #expect(Array(zoom9).count == 70)
 
         // At zoom 8 it spans x 132..138, y 80..89. With metaSize 4 the
         // aligned grid needs 2 × 3 = 6 blocks.
-        let zoom8 = MetatileSequence(bounds: Fixtures.germany, zoomRange: 8 ... 8, metaSize: 4)
+        let zoom8 = try MetatileSequence(bounds: Fixtures.germany, zoomRange: 8 ... 8, metaSize: 4)
         #expect(zoom8.count == 6)
     }
 
     @Test
-    func `metatile sequence order follows zoom order`() {
-        let descending = MetatileSequence(bounds: Fixtures.germany, zoomRange: 12 ... 13, metaSize: 2)
+    func `metatile sequence order follows zoom order`() throws {
+        let descending = try MetatileSequence(bounds: Fixtures.germany, zoomRange: 12 ... 13, metaSize: 2)
         #expect(descending.zoomLevels == [13, 12])
 
-        let ascending = MetatileSequence(bounds: Fixtures.germany, zoomRange: 12 ... 13, metaSize: 2, zoomOrder: .ascending)
+        let ascending = try MetatileSequence(bounds: Fixtures.germany, zoomRange: 12 ... 13, metaSize: 2, zoomOrder: .ascending)
         #expect(ascending.zoomLevels == [12, 13])
     }
 
     @Test
-    func `metatile sequence tiles stay within bounds`() {
-        let sequence = MetatileSequence(bounds: Fixtures.germany, zoomRange: 10 ... 11, metaSize: 4)
-        let plain = Set(Array(TileSequence(bounds: Fixtures.germany, zoomRange: 10 ... 11)))
+    func `metatile sequence tiles stay within bounds`() throws {
+        let sequence = try MetatileSequence(bounds: Fixtures.germany, zoomRange: 10 ... 11, metaSize: 4)
+        let plain = try Set(Array(TileSequence(bounds: Fixtures.germany, zoomRange: 10 ... 11)))
         for block in sequence {
             #expect(block.origin.z >= 10)
             for tile in block.tiles {
@@ -308,8 +308,8 @@ struct MetatileTests {
     }
 
     @Test
-    func `metatile generator hands out blocks exactly once`() {
-        let sequence = MetatileSequence(bounds: Fixtures.germany, zoomRange: 10 ... 10, metaSize: 2)
+    func `metatile generator hands out blocks exactly once`() throws {
+        let sequence = try MetatileSequence(bounds: Fixtures.germany, zoomRange: 10 ... 10, metaSize: 2)
         let generator = MetatileGenerator(sequence)
 
         var fromGenerator: Set<Metatile> = []
@@ -329,7 +329,7 @@ struct MetatileTests {
             maxPoolSize: 4,
             maxUsesPerObject: 1000)
 
-        let generator = MetatileGenerator(MetatileSequence(bounds: Fixtures.germany, zoomRange: 8 ... 8, metaSize: 2))
+        let generator = try MetatileGenerator(MetatileSequence(bounds: Fixtures.germany, zoomRange: 8 ... 8, metaSize: 2))
         let rendered = ThreadSafeCounter()
         let skipped = ThreadSafeCounter()
 

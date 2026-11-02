@@ -14,7 +14,7 @@ private func withRetry<T: Sendable>(
         }
         catch MapnikPoolError.exhausted {
             if attempt == maxAttempts - 1 {
-                throw MapnikPoolError.exhausted
+                throw MapnikPoolError.exhausted(limit: 0)
             }
             try await Task.sleep(for: .milliseconds(5))
         }
@@ -73,7 +73,7 @@ struct MapnikPoolTests {
         _ = try pool.acquire()
         _ = try pool.acquire()
 
-        #expect(throws: MapnikPoolError.exhausted) {
+        #expect(throws: MapnikPoolError.exhausted(limit: 2)) {
             try pool.acquire()
         }
     }
@@ -140,7 +140,7 @@ struct MapnikPoolTests {
     }
 
     @Test
-    func `factory failures propagate from init`() {
+    func `factory failures propagate from init`() throws {
         struct Boom: Error {}
 
         #expect(throws: Boom.self) {

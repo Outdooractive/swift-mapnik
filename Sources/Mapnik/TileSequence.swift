@@ -37,12 +37,23 @@ public struct TileSequence: Sequence, Sendable {
     public let zoomRange: ClosedRange<Int>
     public let zoomOrder: ZoomOrder
 
+    /// Creates a tile sequence.
+    ///
+    /// - Parameters:
+    ///   - bounds: The area to cover, in WGS 84 degrees.
+    ///   - zoomRange: The zoom levels to visit, 0...30.
+    ///   - zoomOrder: The order in which zoom levels are visited.
+    /// - Throws: `MapnikError.invalidInput` when the zoom range is out of
+    ///   range.
     public init(
         bounds: BoundingBox,
         zoomRange: ClosedRange<Int>,
         zoomOrder: ZoomOrder = .descending,
-    ) {
-        precondition(zoomRange.lowerBound >= 0 && zoomRange.upperBound <= 30, "zoom range out of range")
+    ) throws {
+        guard zoomRange.lowerBound >= 0, zoomRange.upperBound <= 30 else {
+            throw MapnikError.invalidInput(
+                "zoom range must be in 0...30, got \(zoomRange.lowerBound)...\(zoomRange.upperBound)")
+        }
 
         self.bounds = bounds
         self.zoomRange = zoomRange
@@ -216,14 +227,29 @@ public struct MetatileSequence: Sequence, Sendable {
     public let zoomRange: ClosedRange<Int>
     public let zoomOrder: TileSequence.ZoomOrder
 
+    /// Creates a metatile sequence.
+    ///
+    /// - Parameters:
+    ///   - bounds: The area to cover, in WGS 84 degrees.
+    ///   - zoomRange: The zoom levels to visit, 0...30.
+    ///   - metaSize: Tiles per metatile edge, 1...``MetatileOptions/maxMetaSize``.
+    ///   - zoomOrder: The order in which zoom levels are visited.
+    /// - Throws: `MapnikError.invalidInput` when `metaSize` or the zoom range
+    ///   is out of range.
     public init(
         bounds: BoundingBox,
         zoomRange: ClosedRange<Int>,
         metaSize: Int = 4,
         zoomOrder: TileSequence.ZoomOrder = .descending,
-    ) {
-        precondition(metaSize >= 1, "metaSize must be positive")
-        precondition(zoomRange.lowerBound >= 0 && zoomRange.upperBound <= 30, "zoom range out of range")
+    ) throws {
+        guard metaSize >= 1, metaSize <= MetatileOptions.maxMetaSize else {
+            throw MapnikError.invalidInput(
+                "metaSize must be in 1...\(MetatileOptions.maxMetaSize), got \(metaSize)")
+        }
+        guard zoomRange.lowerBound >= 0, zoomRange.upperBound <= 30 else {
+            throw MapnikError.invalidInput(
+                "zoom range must be in 0...30, got \(zoomRange.lowerBound)...\(zoomRange.upperBound)")
+        }
 
         self.metaSize = metaSize
         self.bounds = bounds
@@ -334,7 +360,7 @@ public struct MetatileSequence: Sequence, Sendable {
                 }
             }
 
-            return Metatile(origin: origin, metaSize: sequence.metaSize, tiles: tiles)
+            return Metatile(uncheckedOrigin: origin, metaSize: sequence.metaSize, tiles: tiles)
         }
 
         private mutating func advanceZoom() {

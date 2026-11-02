@@ -1,10 +1,11 @@
+import Foundation
 import MapnikC
 
 /// Errors thrown by Mapnik operations.
 ///
 /// Every case carries a human-readable message with diagnostics from the
 /// underlying mapnik library, so failures are actionable without a debugger.
-public enum MapnikError: Error, Sendable {
+public enum MapnikError: Error, Sendable, Equatable {
 
     /// Global library initialization failed (registering plugins or fonts).
     case initialization(String)
@@ -18,6 +19,9 @@ public enum MapnikError: Error, Sendable {
 
     /// A parameter was out of range or otherwise invalid.
     case invalidInput(String)
+
+    /// Serializing the map to XML failed.
+    case serializationFailed(String)
 
 }
 
@@ -33,7 +37,17 @@ extension MapnikError: CustomStringConvertible {
             "Rendering failed: \(message)"
         case let .invalidInput(message):
             "Invalid input: \(message)"
+        case let .serializationFailed(message):
+            "Serialization failed: \(message)"
         }
+    }
+
+}
+
+extension MapnikError: LocalizedError {
+
+    public var errorDescription: String? {
+        description
     }
 
 }

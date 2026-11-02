@@ -109,10 +109,10 @@ struct TileSequenceTests {
         northEast: Coordinate3D(latitude: 47.6, longitude: 10.6))
 
     @Test
-    func `single zoom produces exactly B box tiles`() {
+    func `single zoom produces exactly B box tiles`() throws {
         // A small bbox at low zoom: 10.2..10.6 E, 47.2..47.6 N spans 2 tiles
         // per axis at zoom 9.
-        let sequence = TileSequence(bounds: bounds, zoomRange: 9 ... 9)
+        let sequence = try TileSequence(bounds: bounds, zoomRange: 9 ... 9)
         let tiles = Array(sequence)
 
         #expect(sequence.count == 4)
@@ -127,8 +127,8 @@ struct TileSequenceTests {
     }
 
     @Test
-    func `multiple zoom levels descend by default`() {
-        let sequence = TileSequence(bounds: bounds, zoomRange: 12 ... 13)
+    func `multiple zoom levels descend by default`() throws {
+        let sequence = try TileSequence(bounds: bounds, zoomRange: 12 ... 13)
         let tiles = Array(sequence)
 
         #expect(tiles.count == sequence.count)
@@ -139,8 +139,8 @@ struct TileSequenceTests {
     }
 
     @Test
-    func `ascending order visits zoom levels reverse`() {
-        let sequence = TileSequence(bounds: bounds, zoomRange: 12 ... 13, zoomOrder: .ascending)
+    func `ascending order visits zoom levels reverse`() throws {
+        let sequence = try TileSequence(bounds: bounds, zoomRange: 12 ... 13, zoomOrder: .ascending)
         let tiles = Array(sequence)
 
         #expect(tiles.first?.z == 12)
@@ -148,22 +148,22 @@ struct TileSequenceTests {
     }
 
     @Test
-    func `count matches iterated tile count across zooms`() {
+    func `count matches iterated tile count across zooms`() throws {
         for zoomRange in [10 ... 10, 10 ... 12, 0 ... 4, 14 ... 16] {
-            let sequence = TileSequence(bounds: bounds, zoomRange: zoomRange)
+            let sequence = try TileSequence(bounds: bounds, zoomRange: zoomRange)
             #expect(sequence.count == Array(sequence).count)
         }
     }
 
     @Test
-    func `worldwide zoom iterates tiles`() {
-        let sequence = TileSequence(bounds: .world, zoomRange: 0 ... 2)
+    func `worldwide zoom iterates tiles`() throws {
+        let sequence = try TileSequence(bounds: .world, zoomRange: 0 ... 2)
         #expect(sequence.count == 21)
     }
 
     @Test
-    func `tile generator hands out same tiles exactly once`() {
-        let sequence = TileSequence(bounds: bounds, zoomRange: 13 ... 14)
+    func `tile generator hands out same tiles exactly once`() throws {
+        let sequence = try TileSequence(bounds: bounds, zoomRange: 13 ... 14)
         let generator = TileGenerator(sequence)
 
         var fromGenerator: Set<MapTile> = []
@@ -174,8 +174,8 @@ struct TileSequenceTests {
     }
 
     @Test
-    func `iterator returns nil after exhaustion`() {
-        var iterator = TileSequence(bounds: bounds, zoomRange: 9 ... 9).makeIterator()
+    func `iterator returns nil after exhaustion`() throws {
+        var iterator = try TileSequence(bounds: bounds, zoomRange: 9 ... 9).makeIterator()
         for _ in 0 ..< 4 {
             #expect(iterator.next() != nil)
         }
@@ -184,8 +184,8 @@ struct TileSequenceTests {
     }
 
     @Test
-    func `tiles at any zoom within valid bounds`() {
-        let sequence = TileSequence(bounds: bounds, zoomRange: 0 ... 8)
+    func `tiles at any zoom within valid bounds`() throws {
+        let sequence = try TileSequence(bounds: bounds, zoomRange: 0 ... 8)
         for tile in sequence {
             #expect(tile.x >= 0)
             #expect(tile.y >= 0)
