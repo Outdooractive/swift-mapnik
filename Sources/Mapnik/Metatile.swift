@@ -12,6 +12,11 @@ import MapnikC
 /// typically the intersection of the aligned block with a bounding box.
 public struct Metatile: Sendable, Hashable {
 
+    /// Upper bound for ``metaSize``. Larger blocks hold quadratically more
+    /// pixels: a 16 × 16 metatile of 256-pixel tiles at scale 2 already holds
+    /// 8192² pixels = 256 MB of RGBA data.
+    public static let maxMetaSize = 16
+
     /// The block's top-left (north-west) tile. Its x/y are multiples of
     /// `metaSize` at zoom `z`.
     public let origin: MapTile
@@ -22,8 +27,16 @@ public struct Metatile: Sendable, Hashable {
     /// The tiles to deliver from this block (subset of the block).
     public let tiles: [MapTile]
 
+    /// Creates a metatile block.
+    ///
+    /// - Parameters:
+    ///   - origin: The block's top-left (north-west) tile.
+    ///   - metaSize: Tiles per metatile edge, 1...``maxMetaSize``.
+    ///   - tiles: The tiles to deliver from this block; each must lie inside
+    ///     the block. Defaults to an empty list.
     public init(origin: MapTile, metaSize: Int, tiles: [MapTile] = []) {
         precondition(metaSize >= 1, "metaSize must be positive")
+        precondition(metaSize <= Self.maxMetaSize, "metaSize must not exceed \(Self.maxMetaSize)")
         let isInside: (MapTile) -> Bool = { tile in
             tile.z == origin.z
                 && tile.x >= origin.x
@@ -64,8 +77,9 @@ public struct Metatile: Sendable, Hashable {
 ///
 /// ```swift
 /// let options = MetatileOptions(metaSize: 4, render: .tile(format: .png()))
-/// let metatile = try map.renderMetatile(x: 1080, y: 714, z: 11, options: options)
-/// let tile = try metatile?.tile(x: 1082, y: 715) // crop out one tile
+/// let block = Metatile(origin: MapTile(x: 1080, y: 712, z: 11), metaSize: 4)
+/// let metatile = try map.renderMetatile(block, options: options)
+/// let tile = try metatile?.tile(at: MapTile(x: 1082, y: 715, z: 11)) // crop one tile
 /// ```
 public struct MetatileOptions: Sendable {
 
@@ -75,13 +89,13 @@ public struct MetatileOptions: Sendable {
     ///
     /// The maximum is 16 (a 16 × 16 metatile of 256-pixel tiles at scale 2
     /// already holds 8192² pixels = 256 MB of RGBA data).
-    public static let maxMetaSize = 16
+    public static let maxMetaSize = Metatile.maxMetaSize
 
     /// Tiles per metatile edge.
     public var metaSize: Int
 
-    /// Per-tile render options: `size` is the tile edge length in pixels,
-    /// `scale` the scale factor, `format` the output format used when
+    /// Per-tile render options: `width`/`height` are the tile edge lengths in
+    /// pixels, `scale` the scale factor, `format` the output format used when
     /// cropping, `bufferSize` the padding applied around the whole metatile.
     public var render: RenderOptions
 
@@ -90,9 +104,22 @@ public struct MetatileOptions: Sendable {
         self.render = render
     }
 
-    /// The metatile's pixel dimensions (`metaSize * size * scale`).
-    public var metatileSize: Int {
+    /// The metatile's pixel dimensions (`metaSize * width * scale` by
+    /// `metaSize * height * scale`).
+    public var metatileWidth: Int {
         Int(Double(render.width) * render.scale) * metaSize
+    }
+
+    /// The metatile's pixel height (`metaSize * height * scale`).
+    public var metatileHeight: Int {
+        Int(Double(render.height) * render.scale) * metaSize
+    }
+
+    /// The metatile's pixel dimensions, assuming square tiles.
+    ///
+    /// Use ``metatileWidth``/``metatileHeight`` for non-square tiles.
+    public var metatileSize: Int {
+        metatileWidth
     }
 
     /// Validates the options, throwing `MapnikError.invalidInput` for out of
@@ -103,8 +130,18 @@ public struct MetatileOptions: Sendable {
         }
 
         try render.validate()
-        guard Int(Double(render.width) * render.scale) > 0 else {
-            throw MapnikError.invalidInput("tile width × scale must be positive, got \(render.width) × \(render.scale)")
+        try Self.validatePixelSize(render.width, render.scale, metaSize: metaSize)
+        try Self.validatePixelSize(render.height, render.scale, metaSize: metaSize)
+    }
+
+    /// Throws when `edge * scale * metaSize` does not fit in an `Int`.
+    private static func validatePixelSize(_ edge: Int, _ scale: Double, metaSize: Int) throws {
+        let pixels = Double(edge) * scale
+        guard pixels > 0, pixels.isFinite,
+              pixels * Double(metaSize) <= Double(Int.max)
+        else {
+            throw MapnikError.invalidInput(
+                "tile size × scale × metaSize is out of range, got \(edge) × \(scale) × \(metaSize)")
         }
     }
 
@@ -116,6 +153,12 @@ public struct MetatileOptions: Sendable {
 /// The metatile pixels are held until this value is released; a
 /// `MetatileRendered` of 4 × 4 256-pixel tiles holds 4 MB. Use `tile(_:)`
 /// to extract encoded tiles, then drop the value.
+///
+/// - Note: a cropped tile is byte-for-byte identical to the same tile rendered
+///   on its own when the per-tile device size (`tileSize * scale`) is an
+///   integer and the metatile is rendered at the same scale. With fractional
+///   scale factors the block is rasterized as one image, so sub-pixel geometry
+///   can differ slightly from a standalone tile render.
 public struct MetatileRendered: Sendable {
 
     /// The metatile's top-left (north-west) tile.
@@ -126,6 +169,10 @@ public struct MetatileRendered: Sendable {
 
     /// Tile edge length in pixels (before scale).
     public let tileSize: Int
+
+    /// Tile edge height in pixels (before scale). Equal to ``tileSize`` for
+    /// square tiles.
+    public let tileHeight: Int
 
     /// Scale factor used for rendering.
     public let scale: Double
@@ -155,6 +202,14 @@ public struct MetatileRendered: Sendable {
         return [rgba[offset], rgba[offset + 1], rgba[offset + 2], rgba[offset + 3]]
     }
 
+    /// The raw premultiplied RGBA8 pixels of the whole block, top-down with no
+    /// row padding (`width * height * 4` bytes).
+    ///
+    /// The buffer is shared (copy-on-write), so this accessor is cheap.
+    public var pixels: Data {
+        rgba
+    }
+
     let rgba: Data
     let options: RenderOptions
 
@@ -170,6 +225,7 @@ public struct MetatileRendered: Sendable {
         self.origin = origin
         self.metaSize = metaSize
         self.tileSize = options.width
+        self.tileHeight = options.height
         self.scale = options.scale
         self.width = width
         self.height = height
@@ -182,6 +238,11 @@ public struct MetatileRendered: Sendable {
     /// metatile image, including the scale factor.
     var stride: Int {
         Int(Double(tileSize) * scale)
+    }
+
+    /// The vertical pixel stride of one tile inside the metatile image.
+    var strideY: Int {
+        Int(Double(tileHeight) * scale)
     }
 
     /// Crops and encodes the tile at offset (`dx`, `dy`) inside the metatile.
@@ -226,13 +287,20 @@ public struct MetatileRendered: Sendable {
                 "metatile buffer size mismatch: got \(rgba.count) bytes, expected \(width * height * 4)")
         }
 
+        let stridePixels = stride
+        let stridePixelsY = strideY
+        guard stridePixels * metaSize == width, stridePixelsY * metaSize == height else {
+            throw MapnikError.renderingFailed(
+                "metatile stride mismatch: \(stridePixels)×\(stridePixelsY) per tile × \(metaSize) "
+                    + "does not match the \(width)×\(height) block")
+        }
+
         let imageFormat = format ?? options.format
         if case .svg = imageFormat {
             throw MapnikError.invalidInput("format \(imageFormat.typeString) requires a dedicated SVG render call")
         }
 
-        let stridePixels = stride
-        let offsetBytes = (dy * stridePixels * width + dx * stridePixels) * 4
+        let offsetBytes = (dy * stridePixelsY * width + dx * stridePixels) * 4
 
         var data: UnsafeMutablePointer<UInt8>? = nil
         var size: CUnsignedLong = 0
@@ -251,7 +319,7 @@ public struct MetatileRendered: Sendable {
                     0,
                     0,
                     Int32(clamping: stridePixels),
-                    Int32(clamping: stridePixels),
+                    Int32(clamping: stridePixelsY),
                     imageFormat.typeString,
                     options.skipFullyTransparent,
                     &data,
@@ -264,8 +332,12 @@ public struct MetatileRendered: Sendable {
         if isEmpty || data == nil || size == 0 {
             return nil
         }
+        guard let data else {
+            return nil
+        }
+
         return Data(
-            bytesNoCopy: data!,
+            bytesNoCopy: data,
             count: Int(size),
             deallocator: .custom { buffer, _ in
                 mapnik_free_buffer(buffer)

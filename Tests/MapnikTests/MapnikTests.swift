@@ -3,6 +3,19 @@ import GISTools
 @testable import Mapnik
 import Testing
 
+/// Reads the width and height out of a PNG's IHDR chunk.
+func pngDimensions(_ data: Data) -> (width: Int, height: Int)? {
+    guard data.count >= 24, data.prefix(8).elementsEqual([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) else {
+        return nil
+    }
+
+    func bigEndian(_ range: Range<Int>) -> Int {
+        data[range].reduce(0) { $0 << 8 | Int($1) }
+    }
+
+    return (bigEndian(16 ..< 20), bigEndian(20 ..< 24))
+}
+
 /// Integration tests that exercise the full C → mapnik stack.
 @Suite("Mapnik")
 struct MapnikTests {
@@ -96,16 +109,119 @@ struct MapnikTests {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
         let data = try map.renderTile(Fixtures.europeTile, format: .png(), scale: 2.0)
 
-        #expect(data != nil)
-        #expect(data?.isEmpty == false)
+        let png = try #require(data)
+        #expect(try #require(pngDimensions(png)) == (width: 512, height: 512))
     }
 
     @Test
-    func `out of range tile coordinates throw`() throws {
+    func `non square tiles are honoured`() throws {
+        let map = try Mapnik(xml: Fixtures.polygonStyle)
+        let data = try map.renderTile(
+            Fixtures.europeTile,
+            options: RenderOptions(width: 64, height: 256, format: .png()))
+
+        let png = try #require(data)
+        #expect(try #require(pngDimensions(png)) == (width: 64, height: 256))
+    }
+
+    @Test
+    func `free form render honours scale`() throws {
+        let map = try Mapnik(xml: Fixtures.polygonStyle)
+        let options = RenderOptions(width: 100, height: 100, format: .png())
+
+        let plain = try #require(try map.render(options))
+        #expect(try #require(pngDimensions(plain)) == (width: 100, height: 100))
+
+        var scaled = options
+        scaled.scale = 2.0
+        let retina = try #require(try map.render(scaled))
+        #expect(try #require(pngDimensions(retina)) == (width: 200, height: 200))
+    }
+
+    @Test
+    func `render to file honours scale`() throws {
+        let map = try Mapnik(xml: Fixtures.polygonStyle)
+        let url = FileManager.default
+            .temporaryDirectory
+            .appending(path: "swift-mapnik-scale-\(UUID().uuidString).png")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        try map.renderToFile(to: url, width: 100, height: 100, scale: 2.0, format: .png())
+        #expect(try #require(try pngDimensions(Data(contentsOf: url))) == (width: 200, height: 200))
+    }
+
+    @Test
+    func `palette render honours skip flag`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
 
+        // Ocean tile: nothing painted.
+        try map.zoom(to: BoundingBox(
+            southWest: Coordinate3D(latitude: -50.0, longitude: -160.0),
+            northEast: Coordinate3D(latitude: -45.0, longitude: -150.0)))
+
+        let colors: [UInt32] = [0xFFFF_0000, 0xFF00_0000]
+        let skipped = try map.renderPNG256(
+            colors: colors,
+            options: RenderOptions(width: 64, height: 64, skipFullyTransparent: true, format: .png256))
+        #expect(skipped == nil)
+
+        let kept = try map.renderPNG256(
+            colors: colors,
+            options: RenderOptions(width: 64, height: 64, skipFullyTransparent: false, format: .png256))
+        let png = try #require(kept)
+        #expect(try #require(pngDimensions(png)) == (width: 64, height: 64))
+    }
+
+    @Test
+    func `palette render writes a file`() throws {
+        let map = try Mapnik(xml: Fixtures.polygonStyle)
+        let url = FileManager.default
+            .temporaryDirectory
+            .appending(path: "swift-mapnik-palette-\(UUID().uuidString).png")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        try map.renderPNG256ToFile(
+            colors: [0xFFFF_0000, 0xFF00_0000],
+            to: url,
+            options: RenderOptions(width: 64, height: 64, format: .png256))
+
+        let png = try Data(contentsOf: url)
+        #expect(png.prefix(4).elementsEqual([0x89, 0x50, 0x4E, 0x47]))
+    }
+
+    @Test
+    func `tile to file can write an empty tile`() throws {
+        let map = try Mapnik(xml: Fixtures.polygonStyle)
+        let url = FileManager.default
+            .temporaryDirectory
+            .appending(path: "swift-mapnik-empty-\(UUID().uuidString).png")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        // Ocean tile: nothing painted. With skipping enabled this throws.
         #expect(throws: MapnikError.self) {
+            try map.renderTileToFile(Fixtures.oceanTile, to: url, format: .png())
+        }
+
+        try map.renderTileToFile(
+            Fixtures.oceanTile,
+            to: url,
+            options: RenderOptions(width: 64, height: 64, skipFullyTransparent: false, format: .png()))
+        #expect(try Data(contentsOf: url).isEmpty == false)
+    }
+
+    @Test
+    func `out of range tile coordinates throw invalid input`() throws {
+        let map = try Mapnik(xml: Fixtures.polygonStyle)
+
+        #expect(throws: MapnikError.invalidInput(
+            "tile coordinates (99, 5) out of range for zoom 4"))
+        {
             try map.renderTile(x: 99, y: 5, z: 4)
+        }
+
+        // MapTile clamps z to its own range, but mapnik stops at zoom 30.
+        #expect(throws: MapnikError.invalidInput("zoom level must be in 0...30, got 31")) {
+            try map.renderTile(MapTile(x: 0, y: 0, z: 31))
         }
     }
 
@@ -258,8 +374,30 @@ struct MapnikTests {
 
         let data = try map.render(width: 512, height: 256, format: .png())
         #expect(data != nil)
-        #expect(map.size.width == 512)
-        #expect(map.size.height == 256)
+
+        // Free-form renders restore the map's size, so repeated renders stay
+        // independent of each other.
+        #expect(map.size == initial)
+    }
+
+    @Test
+    func `free form renders restore the map size`() throws {
+        let map = try Mapnik(xml: Fixtures.polygonStyle)
+        let initial = map.size
+
+        _ = try map.render(width: 300, height: 200, format: .png())
+        #expect(map.size == initial)
+
+        _ = try map.renderPNG256(colors: [0xFFFF_0000], width: 300, height: 200)
+        #expect(map.size == initial)
+
+        let url = FileManager.default
+            .temporaryDirectory
+            .appending(path: "swift-mapnik-restore-\(UUID().uuidString).png")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        try map.renderToFile(to: url, width: 320, height: 240, format: .png())
+        #expect(map.size == initial)
     }
 
     @Test
@@ -303,7 +441,7 @@ struct MapnikTests {
                 switch error {
                 case let .invalidStyle(text), let .renderingFailed(text):
                     text
-                case .initialization, .invalidInput:
+                case .initialization, .invalidInput, .serializationFailed:
                     "\(error)"
                 }
             #expect(message.isEmpty == false)
