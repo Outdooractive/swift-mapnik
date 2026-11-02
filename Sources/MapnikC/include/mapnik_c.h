@@ -412,15 +412,16 @@ char* mapnik_datasource_inspect(mapnik_datasource_t* datasource,
 
 /// List the sub-layers of an OGR datasource.
 ///
-/// Writes up to `buffer_count` layer names into `layers_out` (each a pointer
-/// into the internal, statically cached message string — copy before the
-/// next call). Returns the total number of names available, or -1 with
-/// details in `*error_out` when the datasource is not an OGR source or the
-/// message cannot be parsed. Used to fill sublayer selectors in editor UIs.
-int mapnik_datasource_ogr_layers(mapnik_datasource_t* datasource,
-                                 const char** layers_out,
-                                 int buffer_count,
-                                 char** error_out);
+/// Returns a NUL-separated buffer (`name\0name\0...\0`, an empty list yields an
+/// empty string) allocated with `new char[]` and released with
+/// `mapnik_free_string()`. Returns NULL with details in `*error_out` when the
+/// datasource is not an OGR source or the message cannot be parsed.
+///
+/// The result is owned by the caller, so it has no lifetime coupling to the
+/// next call and is safe to use from concurrent callers. Used to fill sublayer
+/// selectors in editor UIs.
+char* mapnik_datasource_ogr_layers(mapnik_datasource_t* datasource,
+                                   char** error_out);
 
 // ---------------------------------------------------------------------------
 // Feature queries

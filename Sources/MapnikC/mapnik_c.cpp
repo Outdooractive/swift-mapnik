@@ -54,6 +54,7 @@
 #include <algorithm>
 #include <atomic>
 #include <fstream>
+#include <iomanip>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -1364,11 +1365,15 @@ std::string json_escape(std::string const& value) {
     return out;
 }
 
-/// Format a floating point value the way mapnik's value.to_string() does
-/// (via ostringstream, default precision).
+/// Format a floating point value for JSON with round-trip precision.
+///
+/// Uses `max_digits10` significant digits so a `double` survives the JSON
+/// round trip exactly. The previous default precision (6 significant digits)
+/// rounded coordinates at Web Mercator magnitudes to ~10 m, which silently
+/// shifted datasource extents and attribute samples.
 std::string json_number(double value) {
     std::ostringstream stream;
-    stream << value;
+    stream << std::setprecision(std::numeric_limits<double>::max_digits10) << value;
     std::string text = stream.str();
     return (text == "-0") ? "0" : text;
 }
@@ -1832,13 +1837,21 @@ char* mapnik_datasource_inspect(mapnik_datasource_t* datasource,
     }
 }
 
-int mapnik_datasource_ogr_layers(mapnik_datasource_t* datasource,
-                                 const char** layers_out,
-                                 int buffer_count,
-                                 char** error_out) {
+/// List the sub-layers of an OGR datasource.
+///
+/// Returns a NUL-separated buffer (`name\0name\0...\0`, an empty list yields
+/// an empty string) allocated with `new char[]` and released with
+/// `mapnik_free_string()`. Returns NULL with details in `*error_out` when the
+/// datasource is not an OGR source or the message cannot be parsed.
+///
+/// Returning an owned buffer (instead of pointers into process-wide static
+/// storage) means the result has no lifetime coupling to the next call and is
+/// safe to use from concurrent callers.
+char* mapnik_datasource_ogr_layers(mapnik_datasource_t* datasource,
+                                   char** error_out) {
     if (datasource == nullptr || datasource->datasource == nullptr) {
         report_error(error_out, "datasource is not initialized");
-        return -1;
+        return nullptr;
     }
 
     // Recreating the datasource surfaces the OGR "missing <layer>" exception
@@ -1852,14 +1865,14 @@ int mapnik_datasource_ogr_layers(mapnik_datasource_t* datasource,
         mapnik::datasource_cache::instance().create(retry);
         // No exception: not an OGR-multi-layer datasource.
         report_error(error_out, "datasource has no sub-layers");
-        return -1;
+        return nullptr;
     }
     catch (mapnik::datasource_exception const& e) {
         std::string const message = e.what();
         std::size_t const marker = message.find("are: ");
         if (marker == std::string::npos) {
             report_error(error_out, message);
-            return -1;
+            return nullptr;
         }
 
         std::string const list = message.substr(marker + 5);
@@ -1880,25 +1893,11 @@ int mapnik_datasource_ogr_layers(mapnik_datasource_t* datasource,
             start = comma + 1;
         }
 
-        if (layers_out != nullptr) {
-            // The strings handed out must survive until the caller has copied
-            // them: keep the names in a call-spanning static buffer whose
-            // contents stay valid until the next invocation.
-            static std::mutex storage_mutex;
-            static std::vector<std::string> storage;
-            std::lock_guard<std::mutex> storage_lock(storage_mutex);
-            storage = names;
-            int const copied = std::min(static_cast<int>(names.size()), buffer_count);
-            for (int i = 0; i < copied; ++i) {
-                layers_out[i] = storage[static_cast<std::size_t>(i)].c_str();
-            }
-            return static_cast<int>(names.size());
-        }
-        return static_cast<int>(names.size());
+        return copy_names_to_buffer(names, error_out);
     }
     catch (std::exception const& e) {
         report_error(error_out, e.what());
-        return -1;
+        return nullptr;
     }
 }
 
@@ -2052,8 +2051,16 @@ mapnik_palette_t* mapnik_palette_create(const unsigned int* colors,
 
         std::string packed;
         packed.reserve(static_cast<std::size_t>(color_count) * 4);
+        std::set<unsigned> seen;
         for (int i = 0; i < color_count; ++i) {
             unsigned const c = colors[i];
+            if (!seen.insert(c).second) {
+                std::ostringstream message;
+                message << "duplicate palette color at index " << i
+                        << ": 0x" << std::hex << std::uppercase << c;
+                report_error(error_out, message.str());
+                return nullptr;
+            }
             // rgba_palette parses bytes in RGBA order.
             packed.push_back(static_cast<char>((c >> 16) & 0xFF)); // R
             packed.push_back(static_cast<char>((c >> 8) & 0xFF));  // G

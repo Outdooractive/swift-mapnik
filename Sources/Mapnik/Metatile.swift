@@ -146,10 +146,12 @@ public struct MetatileRendered: Sendable {
         guard x >= 0, x < width, y >= 0, y < height else {
             return nil
         }
+
         let offset = (y * width + x) * 4
         guard offset + 3 < rgba.count else {
             return nil
         }
+
         return [rgba[offset], rgba[offset + 1], rgba[offset + 2], rgba[offset + 3]]
     }
 
