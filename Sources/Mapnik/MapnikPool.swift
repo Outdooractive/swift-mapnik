@@ -4,7 +4,9 @@ import Foundation
 public enum MapnikPoolError: Error, Sendable, Equatable {
 
     /// The pool is at its maximum size and all objects are in use.
+    ///
     /// Callers should either wait, reduce concurrency, or handle the error.
+    /// `limit` is the pool's `maxPoolSize`, useful for logging.
     case exhausted(limit: Int)
 
 }
@@ -146,10 +148,8 @@ public final class MapnikPool: @unchecked Sendable {
             return map
         }
 
-        guard available.count + _inUseCount + creating < maxPoolSize else {
-            let limit = maxPoolSize
-            lock.unlock()
-            throw MapnikPoolError.exhausted(limit: limit)
+        guard available.count + inUseCount < maxPoolSize else {
+            throw MapnikPoolError.exhausted(limit: maxPoolSize)
         }
 
         creating += 1

@@ -118,7 +118,7 @@ struct MapnikDatasourceTests {
 
     /// Empty parameters rejected.
     @Test
-    func `empty parameters rejected`() {
+    func `empty parameters rejected`() throws {
         #expect(throws: (any Error).self) {
             _ = try MapnikDatasource(parameters: [])
         }

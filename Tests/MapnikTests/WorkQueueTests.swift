@@ -235,7 +235,7 @@ struct WorkQueueTests {
             maxPoolSize: 4,
             maxUsesPerObject: 1000)
 
-        let generator = TileGenerator(TileSequence(bounds: Fixtures.germany, zoomRange: 8 ... 8))
+        let generator = try TileGenerator(TileSequence(bounds: Fixtures.germany, zoomRange: 8 ... 8))
         let rendered = ThreadSafeCounter()
         let skipped = ThreadSafeCounter()
 

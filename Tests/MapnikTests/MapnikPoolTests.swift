@@ -174,7 +174,7 @@ struct MapnikPoolTests {
 
     /// Factory failures propagate from init.
     @Test
-    func `factory failures propagate from init`() {
+    func `factory failures propagate from init`() throws {
         struct Boom: Error {}
 
         #expect(throws: Boom.self) {
