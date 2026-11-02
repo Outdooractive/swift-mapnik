@@ -87,7 +87,7 @@ struct WorkQueueTests {
         #expect(processed.value == 30)
     }
 
-    /// Max concurrency clamped to sane range.
+    /// Max concurrency is clamped to the documented range.
     @Test
     func maxConcurrencyClampedToSaneRange() async {
         let queue = WorkQueue<Int, Int>(
@@ -97,9 +97,47 @@ struct WorkQueueTests {
             onResult: { _, _ in },
         )
 
-        #expect(await queue.maxConcurrency == 256)
+        #expect(await queue.maxConcurrency == WorkQueue<Int, Int>.concurrencyRange.upperBound)
+
+        // setMaxConcurrency is the only way to change it from outside the
+        // actor, and it clamps like the property setter.
         await queue.setMaxConcurrency(0)
-        #expect(await queue.maxConcurrency == 1)
+        #expect(await queue.maxConcurrency == WorkQueue<Int, Int>.concurrencyRange.lowerBound)
+
+        await queue.setMaxConcurrency(8)
+        #expect(await queue.maxConcurrency == 8)
+    }
+
+    /// Raising the limit mid-run takes effect without interrupting work.
+    @Test
+    func raisingMaxConcurrencyMidRunIsHonoured() async throws {
+        let source = WorkSource(Array(1 ... 200))
+        let peak = ThreadSafeCounter()
+        let current = ThreadSafeCounter()
+
+        let queue = WorkQueue<Int, Int>(
+            maxConcurrency: 1,
+            fetchWork: { source.next() },
+            processWork: { work in
+                current.increment()
+                peak.recordMaximum(current.value)
+
+                try? await Task.sleep(for: .milliseconds(2))
+                current.decrement()
+                return work
+            },
+            onResult: { _, _ in },
+        )
+
+        let task = Task { try await queue.start() }
+
+        // Let the queue start with a single worker, then raise the limit.
+        try await Task.sleep(for: .milliseconds(50))
+        await queue.setMaxConcurrency(8)
+        try await task.value
+
+        #expect(peak.value > 1, "raising maxConcurrency mid-run had no effect")
+        #expect(source.remaining == 0)
     }
 
     /// Errors from process work propagate.
@@ -284,6 +322,19 @@ final class ThreadSafeCounter: @unchecked Sendable {
     func increment() {
         lock.lock()
         _value += 1
+        lock.unlock()
+    }
+
+    func decrement() {
+        lock.lock()
+        _value -= 1
+        lock.unlock()
+    }
+
+    /// Sets the value only when it is greater than the current one.
+    func recordMaximum(_ candidate: Int) {
+        lock.lock()
+        _value = max(_value, candidate)
         lock.unlock()
     }
 

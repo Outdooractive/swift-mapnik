@@ -43,22 +43,51 @@ public actor WorkQueue<Work: Sendable, Result: Sendable> {
     private let processWork: @Sendable (Work) async throws -> Result?
     private let onResult: @Sendable (Work, Result?) async throws -> Void
 
+    /// The range ``maxConcurrency`` is clamped to.
+    ///
+    /// Values outside this range are clamped rather than rejected, so callers
+    /// that need to validate their own input can check against it first.
+    public static var concurrencyRange: ClosedRange<Int> {
+        1 ... 256
+    }
+
     private var _maxConcurrency: Int
     private var inFlight = 0
 
-    /// The maximum number of concurrently processed work items (1...256).
+    /// The maximum number of concurrently processed work items.
+    ///
+    /// The value is clamped to ``concurrencyRange``: assigning `1000` stores
+    /// `256`, assigning `0` stores `1`. Check against ``concurrencyRange``
+    /// before assigning if the exact value matters.
+    ///
+    /// Changing this while ``start()`` is running is supported. The queue
+    /// re-reads it each time it refills, so a raised limit takes effect as
+    /// soon as an in-flight item finishes. Lowering it does not interrupt
+    /// running `processWork` calls, so the number of concurrent items can
+    /// briefly exceed the new limit until they complete.
     public var maxConcurrency: Int {
         get { _maxConcurrency }
-        set { _maxConcurrency = max(1, min(256, newValue)) }
+        set { _maxConcurrency = Self.clamp(newValue) }
     }
 
-    /// Sets the maximum concurrency, clamped to 1...256.
+    /// Clamps `value` into ``concurrencyRange``.
+    private static func clamp(_ value: Int) -> Int {
+        min(max(value, concurrencyRange.lowerBound), concurrencyRange.upperBound)
+    }
+
+    /// Sets ``maxConcurrency`` from outside the actor.
+    ///
+    /// The property itself is readable from any context, but Swift only
+    /// permits mutating actor state from inside the actor, so this method is
+    /// the supported way to change the limit. It clamps to
+    /// ``concurrencyRange`` exactly like the setter does.
     public func setMaxConcurrency(_ value: Int) {
         maxConcurrency = value
     }
 
     /// - Parameters:
-    ///   - maxConcurrency: Upper bound for parallel `processWork` calls.
+    ///   - maxConcurrency: Upper bound for parallel `processWork` calls,
+    ///     clamped to ``concurrencyRange``.
     ///   - fetchWork: Produces the next work item, or `nil` when the queue
     ///     should drain and finish. Called on the actor.
     ///   - processWork: Transforms a work item into a result. Runs detached
@@ -72,7 +101,7 @@ public actor WorkQueue<Work: Sendable, Result: Sendable> {
         processWork: @escaping @Sendable (Work) async throws -> Result?,
         onResult: @escaping @Sendable (Work, Result?) async throws -> Void,
     ) {
-        self._maxConcurrency = max(1, min(256, maxConcurrency))
+        self._maxConcurrency = Self.clamp(maxConcurrency)
         self.fetchWork = fetchWork
         self.processWork = processWork
         self.onResult = onResult
