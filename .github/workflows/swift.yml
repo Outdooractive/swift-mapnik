@@ -10,50 +10,38 @@ on:
     branches: [ "main" ]
 
 jobs:
-  test:
-    name: Test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+  macos:
+    name: Test (macOS)
+    runs-on: macos-latest
     # The macOS test runner has been observed to hang before executing the
     # first test (Swift Testing parallel executor produces no output); cap
     # the job so a stuck run fails fast instead of burning the 6-hour
     # runner limit.
     timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, ubuntu-latest]
-        swift: ["6.3.3"]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
 
     - name: Setup Swift
       uses: swift-actions/setup-swift@v3
       with:
-        swift-version: ${{ matrix.swift }}
+        swift-version: "6.3.3"
 
-    - name: Install mapnik (Linux)
-      if: runner.os == 'Linux'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y libmapnik-dev mapnik-utils fonts-dejavu-core
-
-    - name: Install mapnik (macOS)
-      if: runner.os == 'macOS'
-      # The mapnik formula does not ship fonts; the DejaVu cask provides the
-      # "DejaVu Sans Book" face the test stylesheets reference.
+    # The mapnik formula does not ship fonts; the DejaVu cask provides the
+    # "DejaVu Sans Book" face the test stylesheets reference.
+    - name: Install mapnik
       run: |
         brew install mapnik
         brew install --cask font-dejavu-sans
 
     - name: Cache SwiftPM build
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: |
           .build
-        key: ${{ runner.os }}-swift-${{ matrix.swift }}-${{ hashFiles('Package.swift') }}
+        key: ${{ runner.os }}-swift-6.3.3-${{ hashFiles('Package.swift') }}
         restore-keys: |
-          ${{ runner.os }}-swift-${{ matrix.swift }}-
+          ${{ runner.os }}-swift-6.3.3-
 
     - name: Build
       run: CC=clang CXX=clang++ swift build
@@ -61,4 +49,42 @@ jobs:
     - name: Test
       # --no-parallel: Swift Testing's parallel executor hung with no output
       # before the first test on the macOS runner with Swift 6.3.3.
+      run: CC=clang CXX=clang++ swift test --no-parallel
+
+  linux:
+    name: Test (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Run in the official Swift image instead of installing a toolchain with
+    # swift-actions/setup-swift: on Linux that action downloads Swiftly and
+    # verifies its GPG signature without importing swift.org's keys first, so
+    # every run fails with "Can't check signature: No public key"
+    # (swift-actions/setup-swift#798). The image also matches the Swift
+    # version exactly and is what the sibling packages use.
+    container: swift:6.3.3
+
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Install mapnik
+      # The container runs as root, so no sudo. Ubuntu 24.04 (the image's
+      # base) ships mapnik 3.1 with the AGG and cairo headers the shim
+      # includes.
+      run: |
+        apt-get update
+        apt-get install -y libmapnik-dev mapnik-utils fonts-dejavu-core
+
+    - name: Cache SwiftPM build
+      uses: actions/cache@v5
+      with:
+        path: |
+          .build
+        key: ${{ runner.os }}-swift-6.3.3-${{ hashFiles('Package.swift') }}
+        restore-keys: |
+          ${{ runner.os }}-swift-6.3.3-
+
+    - name: Build
+      run: CC=clang CXX=clang++ swift build
+
+    - name: Test
       run: CC=clang CXX=clang++ swift test --no-parallel

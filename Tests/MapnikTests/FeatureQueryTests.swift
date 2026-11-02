@@ -39,7 +39,8 @@ struct FeatureQueryTests {
 
         // The Europe polygon covers lon -10..40, lat 35..70. Coordinates are
         // raw (noSRID), so use them directly.
-        let coordinates = feature.geometry.allCoordinates
+        let geometry = try #require(feature.geometry)
+        let coordinates = geometry.allCoordinates
         #expect(coordinates.isEmpty == false)
         #expect(coordinates.allSatisfy({ $0.latitude >= 34.9 }))
         #expect(coordinates.allSatisfy({ $0.latitude <= 70.1 }))

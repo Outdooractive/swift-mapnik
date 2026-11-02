@@ -118,16 +118,17 @@ Tests/MapnikTests/       # Swift Testing: rendering + unit tests
 
 ## Dependencies
 
-- **GISTools** — geographic types (`Coordinate3D`, `BoundingBox`, `MapTile`)
-  and projections. The only dependency of the library target; do not add
-  more without asking first.
+- **GISTools** 3.0.2+ — geographic types (`Coordinate3D`, `BoundingBox`,
+  `MapTile`) and projections. The only dependency of the library target; do
+  not add more without asking first.
 - No third-party frameworks in the C shim.
 
 ## Build & test
 
 Builds on macOS (≥ macOS 15, Homebrew mapnik under `/opt/homebrew`) and
-Linux (Debian/Ubuntu `libmapnik-dev`, plugins under
-`/usr/lib/mapnik/3.1/input`) with Swift 6.3+:
+Linux (Debian/Ubuntu `libmapnik-dev`, plugins discovered via
+`pkg-config libmapnik --variable=plugins_dir` or `/usr/lib/*/mapnik/*/input`)
+with Swift 6.3+:
 
 ```bash
 swift build           # build the library
