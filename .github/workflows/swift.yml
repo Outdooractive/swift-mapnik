@@ -21,9 +21,10 @@ jobs:
     - name: Install SwiftFormat
       run: |
         curl -fsSL -o /tmp/swiftformat.zip \
-          https://github.com/nicklockwood/SwiftFormat/releases/download/0.55.5/swiftformat_linux.zip
-        unzip -q /tmp/swiftformat.zip -d /usr/local/bin
-        chmod +x /usr/local/bin/swiftformat
+          https://github.com/nicklockwood/SwiftFormat/releases/download/0.64.5/swiftformat_linux.zip
+        unzip -q /tmp/swiftformat.zip -d /tmp/swiftformat
+        install -m 0755 /tmp/swiftformat/swiftformat_linux /usr/local/bin/swiftformat
+        swiftformat --version
 
     - name: Lint
       run: swiftformat Sources Tests --swift-version 6.3 --lint
@@ -131,7 +132,11 @@ jobs:
     name: Thread sanitizer
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    container: swift:6.3.3
+    container:
+      image: swift:6.3.3
+      # TSan needs to disable ASLR, which requires the personality syscall
+      # that Docker's default seccomp profile blocks.
+      options: --security-opt seccomp=unconfined
 
     steps:
     - uses: actions/checkout@v5
@@ -144,8 +149,14 @@ jobs:
     # MapnikPool, WorkQueue, MapnikDatasource and TilelistBuilder are
     # @unchecked Sendable with hand-rolled locking, so a TSan run is the only
     # thing that can catch a regression there.
+    #
+    # TSan needs a specific memory layout and cannot always disable ASLR
+    # itself, so run it under `setarch -R` (util-linux is in the base image).
     - name: Test
-      run: CC=clang CXX=clang++ swift test --sanitize=thread --no-parallel
+      run: |
+        CC=clang CXX=clang++ swift build --sanitize=thread --build-tests
+        setarch "$(uname -m)" -R \
+          swift test --sanitize=thread --no-parallel --skip-build
 
   docs:
     name: Documentation
