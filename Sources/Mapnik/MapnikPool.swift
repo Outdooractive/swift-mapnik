@@ -1,11 +1,11 @@
 import Foundation
 
 /// Errors thrown by `MapnikPool`.
-public enum MapnikPoolError: Error, Sendable {
+public enum MapnikPoolError: Error, Sendable, Equatable {
 
     /// The pool is at its maximum size and all objects are in use.
     /// Callers should either wait, reduce concurrency, or handle the error.
-    case exhausted
+    case exhausted(limit: Int)
 
 }
 
@@ -42,28 +42,46 @@ public final class MapnikPool: @unchecked Sendable {
     private let lock = NSLock()
     private var available: [Mapnik] = []
     private var useCounts: [ObjectIdentifier: Int] = [:]
+    /// Objects currently lent out. A release of an object that is not in this
+    /// set is ignored, so a double release cannot hand the same instance to
+    /// two callers.
+    private var lentOut: Set<ObjectIdentifier> = []
+    /// Number of objects currently being created by `acquire`, so concurrent
+    /// callers cannot overshoot `maxPoolSize` while a factory runs unlocked.
+    private var creating = 0
+    private var isClosed = false
     private let factory: @Sendable () throws -> Mapnik
     private let maxPoolSize: Int
     private let maxUsesPerObject: Int
     private let logger: (@Sendable (String) -> Void)?
 
     /// The number of objects currently lent out.
-    public private(set) var inUseCount = 0
+    ///
+    /// Reading this takes the pool lock, so it is safe to poll from another
+    /// thread.
+    public var inUseCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _inUseCount
+    }
+
+    private var _inUseCount = 0
 
     /// Creates a pool and eagerly fills it with `initialSize` map objects.
     ///
     /// - Parameters:
     ///   - factory: Creates a new map object. Called during `init` and from
     ///     `acquire` when the pool grows.
-    ///   - initialSize: Number of objects created up front, in parallel
-    ///     (stylesheet loading is CPU-bound; parallel creation is much faster
-    ///     than a serial loop).
+    ///   - initialSize: Number of objects created up front. Must not exceed
+    ///     `maxPoolSize`.
     ///   - maxPoolSize: Upper bound for the number of live objects. `acquire`
     ///     throws once this many objects are in use.
     ///   - maxUsesPerObject: Number of times an object may be lent out before
     ///     it is retired (dropped instead of returned to the pool).
-    ///   - logger: Optional callback for pool lifecycle diagnostics.
-    /// - Throws: `MapnikError` if an initial object cannot be created.
+    ///   - logger: Optional callback for pool lifecycle diagnostics. Called
+    ///     without the pool lock held, so it may call back into the pool.
+    /// - Throws: `MapnikError` if an initial object cannot be created, or
+    ///   `MapnikError.invalidInput` for out-of-range sizes.
     public init(
         factory: @escaping @Sendable () throws -> Mapnik,
         initialSize: Int = 10,
@@ -71,47 +89,33 @@ public final class MapnikPool: @unchecked Sendable {
         maxUsesPerObject: Int = 50000,
         logger: (@Sendable (String) -> Void)? = nil,
     ) throws {
-        precondition(initialSize >= 0, "initialSize must not be negative")
-        precondition(maxPoolSize > 0, "maxPoolSize must be positive")
-        precondition(maxUsesPerObject > 0, "maxUsesPerObject must be positive")
+        guard initialSize >= 0 else {
+            throw MapnikError.invalidInput("initialSize must not be negative, got \(initialSize)")
+        }
+        guard maxPoolSize > 0 else {
+            throw MapnikError.invalidInput("maxPoolSize must be positive, got \(maxPoolSize)")
+        }
+        guard maxUsesPerObject > 0 else {
+            throw MapnikError.invalidInput("maxUsesPerObject must be positive, got \(maxUsesPerObject)")
+        }
+        guard initialSize <= maxPoolSize else {
+            throw MapnikError.invalidInput(
+                "initialSize (\(initialSize)) must not exceed maxPoolSize (\(maxPoolSize))")
+        }
 
         self.factory = factory
         self.maxPoolSize = maxPoolSize
         self.maxUsesPerObject = maxUsesPerObject
         self.logger = logger
 
-        // Create the initial objects concurrently: loading a stylesheet is
-        // CPU-bound and serial creation dominates startup time otherwise.
-        let initialCount = min(max(0, initialSize), maxPoolSize)
-        let collector = CreationCollector()
-        let group = DispatchGroup()
-        let creationQueue = DispatchQueue(label: "mapnik.pool.init", attributes: .concurrent)
-        let creationLimiter = DispatchSemaphore(value: min(initialCount, 10))
-
-        for _ in 0 ..< initialCount {
-            group.enter()
-            creationLimiter.wait()
-            creationQueue.async {
-                defer {
-                    creationLimiter.signal()
-                    group.leave()
-                }
-
-                do {
-                    try collector.add(factory())
-                }
-                catch {
-                    collector.fail(error)
-                }
-            }
-        }
-        group.wait()
-
-        if let creationError = collector.error {
-            throw creationError
+        // Mapnik serializes stylesheet loading internally, so creating the
+        // initial objects concurrently would only queue them up on that lock.
+        var created: [Mapnik] = []
+        created.reserveCapacity(initialSize)
+        for _ in 0 ..< initialSize {
+            try created.append(factory())
         }
 
-        let created = collector.maps
         self.available = created
         for map in created {
             useCounts[ObjectIdentifier(map)] = maxUsesPerObject
@@ -120,66 +124,60 @@ public final class MapnikPool: @unchecked Sendable {
         logger?("MapnikPool initialized with \(created.count) objects")
     }
 
-    /// Thread-safe collector for the parallel pool initialization.
-    private final class CreationCollector: @unchecked Sendable {
-
-        private let lock = NSLock()
-        private var collectedMaps: [Mapnik] = []
-        private var failure: Error?
-
-        func add(_ map: Mapnik) {
-            lock.lock()
-            defer { lock.unlock() }
-            collectedMaps.append(map)
-        }
-
-        func fail(_ error: Error) {
-            lock.lock()
-            defer { lock.unlock() }
-            if failure == nil {
-                failure = error
-            }
-        }
-
-        var error: Error? {
-            lock.lock()
-            defer { lock.unlock() }
-            return failure
-        }
-
-        var maps: [Mapnik] {
-            lock.lock()
-            defer { lock.unlock() }
-            return collectedMaps
-        }
-
-    }
-
     /// Borrows a map object from the pool, creating a new one if the pool is
     /// below its maximum size.
     ///
+    /// The factory runs **without** the pool lock held, so a slow stylesheet
+    /// load does not block other `acquire`/`release`/`stats` calls.
+    ///
     /// - Throws: `MapnikPoolError.exhausted` if all objects are in use,
-    ///   or the factory's error if creating a new object fails.
+    ///   `MapnikError.invalidInput` if the pool was closed, or the factory's
+    ///   error if creating a new object fails.
     public func acquire() throws -> Mapnik {
         lock.lock()
-        defer { lock.unlock() }
-
+        if isClosed {
+            lock.unlock()
+            throw MapnikError.invalidInput("the pool has been closed")
+        }
         if let map = available.popLast() {
-            inUseCount += 1
+            _inUseCount += 1
+            lentOut.insert(ObjectIdentifier(map))
+            lock.unlock()
             return map
         }
 
-        guard available.count + inUseCount < maxPoolSize else {
-            throw MapnikPoolError.exhausted
+        guard available.count + _inUseCount + creating < maxPoolSize else {
+            let limit = maxPoolSize
+            lock.unlock()
+            throw MapnikPoolError.exhausted(limit: limit)
         }
 
-        let map = try factory()
-        inUseCount += 1
+        creating += 1
+        lock.unlock()
+
+        let map: Mapnik
+        do {
+            map = try factory()
+        }
+        catch {
+            lock.lock()
+            creating -= 1
+            lock.unlock()
+            throw error
+        }
+
+        lock.lock()
+        creating -= 1
+        if isClosed {
+            lock.unlock()
+            throw MapnikError.invalidInput("the pool has been closed")
+        }
+        _inUseCount += 1
+        lentOut.insert(ObjectIdentifier(map))
         useCounts[ObjectIdentifier(map)] = maxUsesPerObject
+        lock.unlock()
 
-        if let logger {
-            logger("MapnikPool created object \(ObjectIdentifier(map)) (pool: \(available.count) available, \(inUseCount) in use)")
-        }
+        logger?("MapnikPool created object \(ObjectIdentifier(map)) (pool: \(maxPoolSize) max, \(inUseCount) in use)")
         return map
     }
 
@@ -187,39 +185,64 @@ public final class MapnikPool: @unchecked Sendable {
     ///
     /// Objects that reached `maxUsesPerObject` are retired instead of being
     /// reused; they are released when the last reference goes away.
+    ///
+    /// Releasing an object that is not currently lent out by this pool is
+    /// ignored (and logged), so an accidental double release cannot put the
+    /// same instance into the pool twice.
     public func release(_ map: Mapnik) {
         lock.lock()
-        defer { lock.unlock() }
 
         let id = ObjectIdentifier(map)
-        guard let remainingUses = useCounts[id] else {
-            // Unknown object: not created by this pool. Accept it defensively
-            // but do not track retirement for it.
-            available.append(map)
-            inUseCount = max(0, inUseCount - 1)
+        guard lentOut.remove(id) != nil else {
+            lock.unlock()
+            logger?("MapnikPool ignoring release of an object that is not lent out: \(id)")
             return
         }
 
-        inUseCount = max(0, inUseCount - 1)
+        _inUseCount = max(0, _inUseCount - 1)
+
+        guard let remainingUses = useCounts[id] else {
+            // Not created by this pool: accept it, but do not track retirement.
+            available.append(map)
+            lock.unlock()
+            return
+        }
 
         if remainingUses <= 1 {
             // Retire: drop instead of returning to the pool.
             useCounts.removeValue(forKey: id)
-            if let logger {
-                logger("MapnikPool retiring object \(id)")
-            }
+            lock.unlock()
+            logger?("MapnikPool retiring object \(id)")
             return
         }
 
         useCounts[id] = remainingUses - 1
         available.append(map)
+        lock.unlock()
+    }
+
+    /// Drops every idle object and rejects further `acquire` calls.
+    ///
+    /// Objects that are currently lent out are retired when they are
+    /// released. Call this when the stylesheet changes or the pool is no
+    /// longer needed.
+    public func close() {
+        lock.lock()
+        isClosed = true
+        let dropped = available
+        available.removeAll()
+        for map in dropped {
+            useCounts.removeValue(forKey: ObjectIdentifier(map))
+        }
+        lock.unlock()
+        logger?("MapnikPool closed, dropped \(dropped.count) idle objects")
     }
 
     /// Pool statistics, useful for monitoring and tests.
     public func stats() -> (available: Int, inUse: Int, live: Int) {
         lock.lock()
         defer { lock.unlock() }
-        return (available.count, inUseCount, available.count + inUseCount)
+        return (available.count, _inUseCount, available.count + _inUseCount)
     }
 
 }

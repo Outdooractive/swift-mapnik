@@ -213,7 +213,7 @@ extension Mapnik {
         }
 
         // A fresh map has no usable extent; mapnik's query_point requires one.
-        zoomAllIfUnset()
+        try zoomAllIfUnset()
 
         var jsonSlot: UnsafeMutablePointer<CChar>? = nil
         do {
