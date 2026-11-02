@@ -769,16 +769,24 @@ public final class Mapnik: @unchecked Sendable {
     /// Web Mercator XYZ tiles; free-form rendering (`render`,
     /// `zoom(to:)`) happens in this SRS.
     public var srs: String {
+        // The shim reports the full length, so grow once if the string does
+        // not fit instead of silently truncating it. Long PROJ.4 strings
+        // (+towgs84, +nadgrids, +comment, ...) easily exceed 255 characters.
         var buffer = [CChar](repeating: 0, count: 256)
-        let length = mapnik_map_get_srs(map, &buffer, Int32(buffer.count))
+        var length = mapnik_map_get_srs(map, &buffer, Int32(buffer.count))
         guard length >= 0 else {
             return ""
         }
 
-        // Truncation (length >= buffer count) is practically impossible for
-        // projection strings; return what fits either way.
-        let bytes = buffer.map { UInt8(bitPattern: $0) }
-        return String(decoding: bytes.prefix(while: { $0 != 0 }), as: UTF8.self)
+        if length >= buffer.count {
+            buffer = [CChar](repeating: 0, count: Int(length) + 1)
+            length = mapnik_map_get_srs(map, &buffer, Int32(buffer.count))
+            guard length >= 0 else {
+                return ""
+            }
+        }
+
+        return String(decoding: buffer.prefix(while: { $0 != 0 }).map { UInt8(bitPattern: $0) }, as: UTF8.self)
     }
 
     /// Sets the map's projection string.
@@ -830,8 +838,11 @@ public final class Mapnik: @unchecked Sendable {
     }
 
     /// Sets the buffer (padding) in pixels used for subsequent renders.
+    ///
+    /// Negative values are clamped to 0; the render entry points reject a
+    /// negative `RenderOptions.bufferSize` instead.
     public func setBufferSize(_ pixels: Int) {
-        mapnik_map_set_buffer_size(map, Int32(clamping: pixels))
+        mapnik_map_set_buffer_size(map, Int32(clamping: max(0, pixels)))
     }
 
     /// The current buffer size in pixels.
@@ -866,6 +877,19 @@ public final class Mapnik: @unchecked Sendable {
         }
     }
 
+    /// Converts a layer index for the C API, returning `nil` when it cannot
+    /// be represented.
+    ///
+    /// A plain `Int32(index)` traps for large values, which would crash the
+    /// caller instead of reporting "out of range".
+    private static func layerIndex(_ index: Int) -> Int32? {
+        guard index >= 0, index <= Int(Int32.max) else {
+            return nil
+        }
+
+        return Int32(index)
+    }
+
     /// Shows or hides a layer by index (render order, 0-based).
     ///
     /// - Returns: `false` if the index is out of range.
@@ -876,12 +900,12 @@ public final class Mapnik: @unchecked Sendable {
 
     /// The visibility of the layer at `index`, or `nil` if out of range.
     public func layerVisible(_ index: Int) -> Bool? {
-        guard index >= 0 else {
+        guard let cIndex = Self.layerIndex(index) else {
             return nil
         }
 
         var visible = false
-        guard mapnik_map_layer_visible(map, Int32(index), &visible) else {
+        guard mapnik_map_layer_visible(map, cIndex, &visible) else {
             return nil
         }
 
@@ -953,31 +977,38 @@ public final class Mapnik: @unchecked Sendable {
     /// A PROJ.4 string or an EPSG code, as set by the stylesheet's layer
     /// `@srs` attribute. `nil` when the index is out of range.
     public func layerSRS(_ index: Int) -> String? {
-        guard index >= 0 else {
+        guard let cIndex = Self.layerIndex(index) else {
             return nil
         }
 
+        // The shim reports the full length, so grow once if the string does
+        // not fit instead of silently truncating it.
         var buffer = [CChar](repeating: 0, count: 256)
-        let length = mapnik_map_layer_srs(map, Int32(index), &buffer, Int32(buffer.count))
+        var length = mapnik_map_layer_srs(map, cIndex, &buffer, Int32(buffer.count))
         guard length >= 0 else {
             return nil
         }
 
-        // Truncation (length >= buffer count) is practically impossible for
-        // projection strings; return what fits either way.
-        let bytes = buffer.map { UInt8(bitPattern: $0) }
-        return String(decoding: bytes.prefix(while: { $0 != 0 }), as: UTF8.self)
+        if length >= buffer.count {
+            buffer = [CChar](repeating: 0, count: Int(length) + 1)
+            length = mapnik_map_layer_srs(map, cIndex, &buffer, Int32(buffer.count))
+            guard length >= 0 else {
+                return nil
+            }
+        }
+
+        return String(decoding: buffer.prefix(while: { $0 != 0 }).map { UInt8(bitPattern: $0) }, as: UTF8.self)
     }
 
     /// Whether the layer at `index` is queryable (responds to feature
     /// queries), or `nil` if out of range.
     public func layerQueryable(_ index: Int) -> Bool? {
-        guard index >= 0 else {
+        guard let cIndex = Self.layerIndex(index) else {
             return nil
         }
 
         var queryable = false
-        guard mapnik_map_layer_queryable(map, Int32(index), &queryable) else {
+        guard mapnik_map_layer_queryable(map, cIndex, &queryable) else {
             return nil
         }
 
@@ -988,12 +1019,12 @@ public final class Mapnik: @unchecked Sendable {
     /// (respecting the layer's min/max scale denominators and visibility),
     /// or `nil` if out of range.
     public func layerVisible(_ index: Int, atScaleDenominator scaleDenominator: Double) -> Bool? {
-        guard index >= 0 else {
+        guard let cIndex = Self.layerIndex(index) else {
             return nil
         }
 
         var visible = false
-        guard mapnik_map_layer_visible_at_scale(map, Int32(index), scaleDenominator, &visible) else {
+        guard mapnik_map_layer_visible_at_scale(map, cIndex, scaleDenominator, &visible) else {
             return nil
         }
 

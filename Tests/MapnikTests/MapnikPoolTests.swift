@@ -175,7 +175,7 @@ struct MapnikPoolTests {
 
     /// Factory failures propagate from init.
     @Test
-    func factoryFailuresPropagateFromInit() {
+    func factoryFailuresPropagateFromInit() throws {
         struct Boom: Error {}
 
         #expect(throws: Boom.self) {
@@ -185,7 +185,7 @@ struct MapnikPoolTests {
 
     /// Init rejects out of range sizes.
     @Test
-    func initRejectsOutOfRangeSizes() {
+    func initRejectsOutOfRangeSizes() throws {
         #expect(throws: MapnikError.self) {
             _ = try MapnikPool(factory: { try Mapnik(xml: Fixtures.polygonStyle) }, initialSize: -1)
         }

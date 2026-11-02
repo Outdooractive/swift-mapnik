@@ -123,7 +123,7 @@ struct MapnikConfigInitializationTests {
 
     /// Scenario nonexistent.
     @Test(.enabled(if: MapnikConfigInitializationTests.activeScenario == "nonexistent"))
-    func scenarioNonexistent() {
+    func scenarioNonexistent() throws {
         do {
             try MapnikConfig.initialize(plugins: "/nonexistent/input", fonts: "/nonexistent/fonts")
             print("scenario-nonexistent: unexpected-success")
@@ -135,7 +135,7 @@ struct MapnikConfigInitializationTests {
 
     /// Scenario retry after failure.
     @Test(.enabled(if: MapnikConfigInitializationTests.activeScenario == "retryAfterFailure"))
-    func scenarioRetryAfterFailure() {
+    func scenarioRetryAfterFailure() throws {
         do {
             try MapnikConfig.initialize(plugins: "/nonexistent/input", fonts: "/nonexistent/fonts")
             print("retry-after-failure: unexpected-success")
@@ -157,7 +157,7 @@ struct MapnikConfigInitializationTests {
 
     /// Scenario different paths.
     @Test(.enabled(if: MapnikConfigInitializationTests.activeScenario == "differentPaths"))
-    func scenarioDifferentPaths() {
+    func scenarioDifferentPaths() throws {
         do {
             _ = try Mapnik(xml: Fixtures.polygonStyle)
         }

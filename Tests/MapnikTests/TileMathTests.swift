@@ -119,10 +119,10 @@ struct TileSequenceTests {
 
     /// Single zoom produces exactly B box tiles.
     @Test
-    func singleZoomProducesExactlyBBoxTiles() {
+    func singleZoomProducesExactlyBBoxTiles() throws {
         // A small bbox at low zoom: 10.2..10.6 E, 47.2..47.6 N spans 2 tiles
         // per axis at zoom 9.
-        let sequence = TileSequence(bounds: bounds, zoomRange: 9 ... 9)
+        let sequence = try TileSequence(bounds: bounds, zoomRange: 9 ... 9)
         let tiles = Array(sequence)
 
         #expect(sequence.count == 4)
@@ -138,8 +138,8 @@ struct TileSequenceTests {
 
     /// Multiple zoom levels descend by default.
     @Test
-    func multipleZoomLevelsDescendByDefault() {
-        let sequence = TileSequence(bounds: bounds, zoomRange: 12 ... 13)
+    func multipleZoomLevelsDescendByDefault() throws {
+        let sequence = try TileSequence(bounds: bounds, zoomRange: 12 ... 13)
         let tiles = Array(sequence)
 
         #expect(tiles.count == sequence.count)
@@ -151,8 +151,8 @@ struct TileSequenceTests {
 
     /// Ascending order visits zoom levels reverse.
     @Test
-    func ascendingOrderVisitsZoomLevelsReverse() {
-        let sequence = TileSequence(bounds: bounds, zoomRange: 12 ... 13, zoomOrder: .ascending)
+    func ascendingOrderVisitsZoomLevelsReverse() throws {
+        let sequence = try TileSequence(bounds: bounds, zoomRange: 12 ... 13, zoomOrder: .ascending)
         let tiles = Array(sequence)
 
         #expect(tiles.first?.z == 12)
@@ -161,24 +161,24 @@ struct TileSequenceTests {
 
     /// Count matches iterated tile count across zooms.
     @Test
-    func countMatchesIteratedTileCountAcrossZooms() {
+    func countMatchesIteratedTileCountAcrossZooms() throws {
         for zoomRange in [10 ... 10, 10 ... 12, 0 ... 4, 14 ... 16] {
-            let sequence = TileSequence(bounds: bounds, zoomRange: zoomRange)
+            let sequence = try TileSequence(bounds: bounds, zoomRange: zoomRange)
             #expect(sequence.count == Array(sequence).count)
         }
     }
 
     /// Worldwide zoom iterates tiles.
     @Test
-    func worldwideZoomIteratesTiles() {
-        let sequence = TileSequence(bounds: .world, zoomRange: 0 ... 2)
+    func worldwideZoomIteratesTiles() throws {
+        let sequence = try TileSequence(bounds: .world, zoomRange: 0 ... 2)
         #expect(sequence.count == 21)
     }
 
     /// Tile generator hands out same tiles exactly once.
     @Test
-    func tileGeneratorHandsOutSameTilesExactlyOnce() {
-        let sequence = TileSequence(bounds: bounds, zoomRange: 13 ... 14)
+    func tileGeneratorHandsOutSameTilesExactlyOnce() throws {
+        let sequence = try TileSequence(bounds: bounds, zoomRange: 13 ... 14)
         let generator = TileGenerator(sequence)
 
         var fromGenerator: Set<MapTile> = []
@@ -190,8 +190,8 @@ struct TileSequenceTests {
 
     /// Iterator returns nil after exhaustion.
     @Test
-    func iteratorReturnsNilAfterExhaustion() {
-        var iterator = TileSequence(bounds: bounds, zoomRange: 9 ... 9).makeIterator()
+    func iteratorReturnsNilAfterExhaustion() throws {
+        var iterator = try TileSequence(bounds: bounds, zoomRange: 9 ... 9).makeIterator()
         for _ in 0 ..< 4 {
             #expect(iterator.next() != nil)
         }
@@ -201,8 +201,8 @@ struct TileSequenceTests {
 
     /// Tiles at any zoom within valid bounds.
     @Test
-    func tilesAtAnyZoomWithinValidBounds() {
-        let sequence = TileSequence(bounds: bounds, zoomRange: 0 ... 8)
+    func tilesAtAnyZoomWithinValidBounds() throws {
+        let sequence = try TileSequence(bounds: bounds, zoomRange: 0 ... 8)
         for tile in sequence {
             #expect(tile.x >= 0)
             #expect(tile.y >= 0)
@@ -213,13 +213,13 @@ struct TileSequenceTests {
 
     /// Antimeridian crossing bounds produce two ranges.
     @Test
-    func antimeridianCrossingBoundsProduceTwoRanges() {
+    func antimeridianCrossingBoundsProduceTwoRanges() throws {
         // 170E ... 170W is a 20 degree strip across the dateline, not the
         // whole world.
         let anti = BoundingBox(
             southWest: Coordinate3D(latitude: -10.0, longitude: 170.0),
             northEast: Coordinate3D(latitude: 10.0, longitude: -170.0))
-        let sequence = TileSequence(bounds: anti, zoomRange: 4 ... 4)
+        let sequence = try TileSequence(bounds: anti, zoomRange: 4 ... 4)
 
         let ranges = sequence.tileRanges(atZoom: 4)
         #expect(ranges.count == 2)
@@ -234,11 +234,11 @@ struct TileSequenceTests {
 
     /// Antimeridian crossing bounds are not expanded to the world.
     @Test
-    func antimeridianCrossingBoundsAreNotExpandedToTheWorld() {
+    func antimeridianCrossingBoundsAreNotExpandedToTheWorld() throws {
         let anti = BoundingBox(
             southWest: Coordinate3D(latitude: -10.0, longitude: 170.0),
             northEast: Coordinate3D(latitude: 10.0, longitude: -170.0))
-        let sequence = TileSequence(bounds: anti, zoomRange: 4 ... 4)
+        let sequence = try TileSequence(bounds: anti, zoomRange: 4 ... 4)
 
         // The whole world at zoom 4 would be 256 tiles.
         #expect(sequence.count < 256)
@@ -247,11 +247,11 @@ struct TileSequenceTests {
 
     /// Antimeridian crossing metatile sequence stays narrow.
     @Test
-    func antimeridianCrossingMetatileSequenceStaysNarrow() {
+    func antimeridianCrossingMetatileSequenceStaysNarrow() throws {
         let anti = BoundingBox(
             southWest: Coordinate3D(latitude: -10.0, longitude: 170.0),
             northEast: Coordinate3D(latitude: 10.0, longitude: -170.0))
-        let sequence = MetatileSequence(bounds: anti, zoomRange: 4 ... 4, metaSize: 2)
+        let sequence = try MetatileSequence(bounds: anti, zoomRange: 4 ... 4, metaSize: 2)
 
         let tiles = Set(Array(sequence).flatMap(\.tiles))
         #expect(tiles.count == 4)
@@ -261,8 +261,8 @@ struct TileSequenceTests {
 
     /// Metatile origin carries the zoom.
     @Test
-    func metatileOriginCarriesTheZoom() {
-        let sequence = MetatileSequence(bounds: bounds, zoomRange: 12 ... 12, metaSize: 4)
+    func metatileOriginCarriesTheZoom() throws {
+        let sequence = try MetatileSequence(bounds: bounds, zoomRange: 12 ... 12, metaSize: 4)
         let origin = sequence.metatileOrigin(forX: 265, forY: 162, atZoom: 12)
 
         #expect(origin.x == 264)

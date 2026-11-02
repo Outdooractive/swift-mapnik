@@ -430,7 +430,7 @@ struct MapnikTests {
 
     /// Invalid stylesheet throws with message.
     @Test
-    func invalidStylesheetThrowsWithMessage() {
+    func invalidStylesheetThrowsWithMessage() throws {
         #expect(throws: MapnikError.self) {
             _ = try Mapnik(xml: Fixtures.brokenStyle)
         }
@@ -438,7 +438,7 @@ struct MapnikTests {
 
     /// Style error messages carry diagnostics.
     @Test
-    func styleErrorMessagesCarryDiagnostics() {
+    func styleErrorMessagesCarryDiagnostics() throws {
         do {
             _ = try Mapnik(xml: Fixtures.brokenStyle)
             Issue.record("Expected invalidStyle error")
@@ -459,7 +459,7 @@ struct MapnikTests {
 
     /// Unknown datasource type reports useful error.
     @Test
-    func unknownDatasourceTypeReportsUsefulError() {
+    func unknownDatasourceTypeReportsUsefulError() throws {
         do {
             let map = try Mapnik(xml: Fixtures.unknownDatasourceStyle)
             // Some mapnik versions only fail at render time.
@@ -568,7 +568,7 @@ struct MapnikTests {
 
     /// Missing stylesheet file throws invalid input.
     @Test
-    func missingStylesheetFileThrowsInvalidInput() {
+    func missingStylesheetFileThrowsInvalidInput() throws {
         let url = FileManager.default
             .temporaryDirectory
             .appending(path: "swift-mapnik-missing-\(UUID().uuidString).xml")
@@ -700,6 +700,115 @@ struct MapnikTests {
         let map = try Mapnik(xml: Fixtures.multiLayerStyle)
         #expect(map.layerCount == 2)
         #expect(map.layerNames.count == 2)
+    }
+
+}
+
+/// Tests for API hardening: no trapping accessors, validated options.
+@Suite("API hardening")
+struct APIHardeningTests {
+
+    /// Layer accessors return nil for indices that do not fit in Int32.
+    @Test
+    func layerAccessorsDoNotTrapOnHugeIndices() throws {
+        let map = try Mapnik(xml: Fixtures.multiLayerStyle)
+
+        // A plain Int32(index) would trap here.
+        #expect(map.layerVisible(Int.max) == nil)
+        #expect(map.layerSRS(Int.max) == nil)
+        #expect(map.layerQueryable(Int.max) == nil)
+        #expect(map.layerVisible(Int.max, atScaleDenominator: 10000) == nil)
+        #expect(map.layerVisible(-1) == nil)
+    }
+
+    /// Long SRS strings survive a round trip.
+    @Test
+    func longSRSStringsAreNotTruncated() throws {
+        let map = try Mapnik(xml: Fixtures.polygonStyle)
+        let proj = "+proj=merc +a=6378137 +b=6378137 +lat_ts=0.0 +lon_0=0.0 +x_0=0.0 +y_0=0.0 "
+            + "+k=1.0 +units=m +nadgrids=@null +wktext +no_defs +over +comment="
+            + String(repeating: "a", count: 200)
+
+        try map.setSRS(proj)
+        #expect(proj.count > 255)
+        #expect(map.srs == proj)
+    }
+
+    /// setBufferSize clamps negative values.
+    @Test
+    func setBufferSizeClampsNegativeValues() throws {
+        let map = try Mapnik(xml: Fixtures.polygonStyle)
+        map.setBufferSize(-5)
+        #expect(map.bufferSize == 0)
+    }
+
+    /// ImageFormat rejects out-of-range options as invalid input.
+    @Test
+    func imageFormatValidatesItsOptions() throws {
+        let map = try Mapnik(xml: Fixtures.polygonStyle)
+
+        #expect(throws: MapnikError.invalidInput("png colors must be in 1...256, got 0")) {
+            _ = try map.renderTile(Fixtures.europeTile, options: RenderOptions(format: .png(colors: 0)))
+        }
+        #expect(throws: MapnikError.invalidInput("png colors must be in 1...256, got 257")) {
+            _ = try map.renderTile(Fixtures.europeTile, options: RenderOptions(format: .png(colors: 257)))
+        }
+        #expect(throws: MapnikError.invalidInput("jpeg quality must be in 0...100, got 500")) {
+            _ = try map.renderTile(Fixtures.europeTile, options: RenderOptions(format: .jpeg(quality: 500)))
+        }
+        #expect(throws: MapnikError.invalidInput("webp quality must be in 0...100, got -1")) {
+            _ = try map.renderTile(Fixtures.europeTile, options: RenderOptions(format: .webp(quality: -1)))
+        }
+    }
+
+    /// MapnikError is Equatable and LocalizedError.
+    @Test
+    func mapnikErrorIsEquatableAndLocalized() {
+        #expect(MapnikError.invalidInput("x") == MapnikError.invalidInput("x"))
+        #expect(MapnikError.invalidInput("x") != MapnikError.invalidInput("y"))
+        #expect(MapnikError.invalidInput("x").errorDescription == "Invalid input: x")
+    }
+
+    /// Metatile rejects out-of-range input instead of trapping.
+    @Test
+    func metatileValidatesInsteadOfTrapping() throws {
+        #expect(throws: MapnikError.self) {
+            _ = try Metatile(origin: MapTile(x: 0, y: 0, z: 1), metaSize: 0)
+        }
+        #expect(throws: MapnikError.self) {
+            _ = try Metatile(origin: MapTile(x: 0, y: 0, z: 1), metaSize: 17)
+        }
+        #expect(throws: MapnikError.self) {
+            _ = try Metatile(
+                origin: MapTile(x: 0, y: 0, z: 1),
+                metaSize: 2,
+                tiles: [MapTile(x: 5, y: 5, z: 1)])
+        }
+    }
+
+    /// Sequences reject out-of-range input instead of trapping.
+    @Test
+    func sequencesValidateInsteadOfTrapping() throws {
+        #expect(throws: MapnikError.self) {
+            _ = try TileSequence(bounds: Fixtures.germany, zoomRange: 0 ... 31)
+        }
+        #expect(throws: MapnikError.self) {
+            _ = try MetatileSequence(bounds: Fixtures.germany, zoomRange: 9 ... 9, metaSize: 0)
+        }
+        #expect(throws: MapnikError.self) {
+            _ = try MetatileSequence(bounds: Fixtures.germany, zoomRange: 9 ... 9, metaSize: 32)
+        }
+    }
+
+    /// BoundingBox parsing rejects malformed input instead of shifting values.
+    @Test
+    func boundingBoxParsingRejectsMalformedInput() {
+        // Five fields with one unparseable used to be accepted as 1,2,3,4.
+        #expect(BoundingBox(parsing: "1,2,foo,3,4") == nil)
+        #expect(BoundingBox(parsing: "1,2,,3,4") == nil)
+        #expect(BoundingBox(parsing: "nan,1,2,3") == nil)
+        #expect(BoundingBox(parsing: "inf,1,2,3") == nil)
+        #expect(BoundingBox(parsing: "1,2,3,4") != nil)
     }
 
 }

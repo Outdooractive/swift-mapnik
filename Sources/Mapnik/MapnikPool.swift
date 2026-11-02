@@ -4,7 +4,9 @@ import Foundation
 public enum MapnikPoolError: Error, Sendable, Equatable {
 
     /// The pool is at its maximum size and all objects are in use.
+    ///
     /// Callers should either wait, reduce concurrency, or handle the error.
+    /// `limit` is the pool's `maxPoolSize`, useful for logging.
     case exhausted(limit: Int)
 
 }

@@ -34,9 +34,15 @@ public struct Metatile: Sendable, Hashable {
     ///   - metaSize: Tiles per metatile edge, 1...``maxMetaSize``.
     ///   - tiles: The tiles to deliver from this block; each must lie inside
     ///     the block. Defaults to an empty list.
-    public init(origin: MapTile, metaSize: Int, tiles: [MapTile] = []) {
-        precondition(metaSize >= 1, "metaSize must be positive")
-        precondition(metaSize <= Self.maxMetaSize, "metaSize must not exceed \(Self.maxMetaSize)")
+    /// - Throws: `MapnikError.invalidInput` when `metaSize` is out of range or
+    ///   a tile lies outside the block. A trapping `precondition` would crash
+    ///   callers that build blocks from external data.
+    public init(origin: MapTile, metaSize: Int, tiles: [MapTile] = []) throws {
+        guard metaSize >= 1, metaSize <= Self.maxMetaSize else {
+            throw MapnikError.invalidInput(
+                "metaSize must be in 1...\(Self.maxMetaSize), got \(metaSize)")
+        }
+
         let isInside: (MapTile) -> Bool = { tile in
             tile.z == origin.z
                 && tile.x >= origin.x
@@ -44,7 +50,21 @@ public struct Metatile: Sendable, Hashable {
                 && tile.y >= origin.y
                 && tile.y < origin.y + metaSize
         }
-        precondition(tiles.allSatisfy(isInside), "tiles must belong to the metatile block")
+
+        guard tiles.allSatisfy(isInside) else {
+            throw MapnikError.invalidInput("tiles must belong to the metatile block")
+        }
+
+        self.origin = origin
+        self.metaSize = metaSize
+        self.tiles = tiles
+    }
+
+    /// Creates a metatile block without validating `tiles`.
+    ///
+    /// Intended for `MetatileSequence`, which computes the tile list itself.
+    /// Prefer ``init(origin:metaSize:tiles:)`` for caller-supplied tiles.
+    init(uncheckedOrigin origin: MapTile, metaSize: Int, tiles: [MapTile]) {
         self.origin = origin
         self.metaSize = metaSize
         self.tiles = tiles
