@@ -38,7 +38,7 @@ Output formats include PNG (8/24/32-bit, paletted), JPEG, WebP, TIFF and SVG (vi
 
 ## Requirements
 
-This package requires Swift 6.3 or higher and the Mapnik 3.x or 4.x C++ library with development headers, and compiles on macOS (\>= macOS 15) and Linux. The [GISTools](https://github.com/Outdooractive/gis-tools) dependency is resolved automatically.
+This package requires Swift 6.3 or higher and the Mapnik 3.x or 4.x C++ library with development headers, and compiles on macOS (\>= macOS 15) and Linux. The [GISTools](https://github.com/Outdooractive/gis-tools) dependency (3.0.2 or newer) is resolved automatically.
 
 ### macOS (Homebrew)
 
@@ -68,7 +68,7 @@ Custom paths can be set via `MapnikConfig.initialize`.
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Outdooractive/swift-mapnik", from: "1.0.0"),
+    .package(url: "https://github.com/Outdooractive/swift-mapnik", from: "2.0.0"),
 ],
 targets: [
     .target(name: "MyTarget", dependencies: [

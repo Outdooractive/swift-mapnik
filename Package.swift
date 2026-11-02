@@ -12,7 +12,7 @@ let package = Package(
         ),
     ],
     dependencies: [
-        .package(url: "https://github.com/Outdooractive/gis-tools.git", from: "2.5.0"),
+        .package(url: "https://github.com/Outdooractive/gis-tools.git", from: "3.0.2"),
     ],
     targets: [
         .target(
