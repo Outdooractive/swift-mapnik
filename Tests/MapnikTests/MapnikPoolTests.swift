@@ -183,7 +183,7 @@ struct MapnikPoolTests {
     }
 
     @Test
-    func `init rejects out of range sizes`() {
+    func `init rejects out of range sizes`() throws {
         #expect(throws: MapnikError.self) {
             _ = try MapnikPool(factory: { try Mapnik(xml: Fixtures.polygonStyle) }, initialSize: -1)
         }

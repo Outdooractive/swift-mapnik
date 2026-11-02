@@ -45,11 +45,16 @@ public final class TilelistBuilder: @unchecked Sendable {
     }
 
     private func addUnlocked(_ tile: MapTile) {
-        state.tiles[tile.z, default: [:]][tile.y, default: []].insert(tile.x)
-        state.count += 1
+        let (inserted, _) = state.tiles[tile.z, default: [:]][tile.y, default: []].insert(tile.x)
+        if inserted {
+            state.count += 1
+        }
     }
 
-    /// The number of tiles added so far.
+    /// The number of unique tiles in the list.
+    ///
+    /// Adding the same tile twice does not increase the count, matching what
+    /// ``tilelist`` encodes.
     public var tileCount: Int {
         lock.lock()
         defer { lock.unlock() }

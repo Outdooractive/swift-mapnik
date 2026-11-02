@@ -45,10 +45,6 @@
 #include <mapnik/util/geometry_to_wkb.hpp>
 #include <mapnik/version.hpp>
 
-// mapnik vendors a modified copy of Anti-Grain Geometry; its headers
-// include "agg_*.h" without a path prefix.
-#include <mapnik/agg/agg_trans_affine.h>
-
 #include <cstdio>
 #include <cstring>
 #include <cmath>
@@ -596,30 +592,45 @@ bool render_cairo_to_buffer(mapnik::Map const& map,
                             std::string const& type,
                             std::string* output,
                             char** error_out) {
-    char pathTemplate[] = "/tmp/mapnik-cairo-XXXXXX";
-    int fd = mkstemp(pathTemplate);
+    // Honour TMPDIR (and the platform temp directory) instead of hard-coding
+    // /tmp, which is not writable in every sandbox.
+    std::error_code path_error;
+    std::filesystem::path const temp_directory =
+        std::filesystem::temp_directory_path(path_error);
+    if (path_error) {
+        return report_error(error_out,
+                            "could not determine the temporary directory: " + path_error.message());
+    }
+
+    std::string const template_path = (temp_directory / "mapnik-cairo-XXXXXX").string();
+    std::vector<char> path_buffer(template_path.begin(), template_path.end());
+    path_buffer.push_back('\0');
+
+    int fd = mkstemp(path_buffer.data());
     if (fd < 0) {
         return report_error(error_out, "could not create temporary file for cairo rendering");
     }
     ::close(fd);
 
+    std::string const path(path_buffer.data());
+
     try {
-        mapnik::save_to_cairo_file(map, std::string(pathTemplate), type, scale_factor, 0.0);
+        mapnik::save_to_cairo_file(map, path, type, scale_factor, 0.0);
     }
     catch (std::exception const& e) {
-        ::remove(pathTemplate);
+        ::remove(path.c_str());
         return report_error(error_out, e.what());
     }
 
-    std::ifstream file(pathTemplate, std::ios::in | std::ios::binary);
+    std::ifstream file(path, std::ios::in | std::ios::binary);
     if (!file) {
-        ::remove(pathTemplate);
+        ::remove(path.c_str());
         return report_error(error_out, "could not read back temporary cairo file");
     }
     std::ostringstream buffer;
     buffer << file.rdbuf();
     file.close();
-    ::remove(pathTemplate);
+    ::remove(path.c_str());
 
     *output = buffer.str();
     return true;

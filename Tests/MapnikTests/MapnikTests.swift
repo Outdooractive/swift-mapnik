@@ -761,7 +761,7 @@ struct APIHardeningTests {
 
     /// Metatile rejects out-of-range input instead of trapping.
     @Test
-    func `metatile validates instead of trapping`() {
+    func `metatile validates instead of trapping`() throws {
         #expect(throws: MapnikError.self) {
             _ = try Metatile(origin: MapTile(x: 0, y: 0, z: 1), metaSize: 0)
         }
@@ -778,7 +778,7 @@ struct APIHardeningTests {
 
     /// Sequences reject out-of-range input instead of trapping.
     @Test
-    func `sequences validate instead of trapping`() {
+    func `sequences validate instead of trapping`() throws {
         #expect(throws: MapnikError.self) {
             _ = try TileSequence(bounds: Fixtures.germany, zoomRange: 0 ... 31)
         }

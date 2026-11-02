@@ -54,7 +54,7 @@ struct MetatileTests {
     }
 
     @Test
-    func `metatile options reject out of range pixel sizes`() {
+    func `metatile options reject out of range pixel sizes`() throws {
         let options = MetatileOptions(
             metaSize: 4,
             render: RenderOptions(width: 1_000_000, height: 1_000_000, scale: 1e14))
@@ -67,7 +67,7 @@ struct MetatileTests {
     @Test
     func `metatile options reject a mismatched meta size`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
-        let block = Metatile(origin: MapTile(x: 8, y: 4, z: 4), metaSize: 2)
+        let block = try Metatile(origin: MapTile(x: 8, y: 4, z: 4), metaSize: 2)
 
         #expect(throws: MapnikError.self) {
             _ = try map.renderMetatile(

@@ -148,8 +148,10 @@ public final class MapnikPool: @unchecked Sendable {
             return map
         }
 
-        guard available.count + inUseCount < maxPoolSize else {
-            throw MapnikPoolError.exhausted(limit: maxPoolSize)
+        guard available.count + _inUseCount + creating < maxPoolSize else {
+            let limit = maxPoolSize
+            lock.unlock()
+            throw MapnikPoolError.exhausted(limit: limit)
         }
 
         creating += 1
