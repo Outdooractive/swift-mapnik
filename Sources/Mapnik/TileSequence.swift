@@ -290,7 +290,7 @@ public struct MetatileSequence: Sequence, Sendable {
     /// - Parameters:
     ///   - bounds: The area to cover, in WGS 84 degrees.
     ///   - zoomRange: The zoom levels to visit, 0...30.
-    ///   - metaSize: Tiles per metatile edge, 1...``MetatileOptions/maxMetaSize``.
+    ///   - metaSize: Tiles per metatile edge, 1...``Metatile/maxMetaSize``.
     ///   - zoomOrder: The order in which zoom levels are visited.
     /// - Throws: `MapnikError.invalidInput` when `metaSize` or the zoom range
     ///   is out of range.
@@ -300,9 +300,9 @@ public struct MetatileSequence: Sequence, Sendable {
         metaSize: Int = 4,
         zoomOrder: TileSequence.ZoomOrder = .descending,
     ) throws {
-        guard metaSize >= 1, metaSize <= MetatileOptions.maxMetaSize else {
+        guard metaSize >= 1, metaSize <= Metatile.maxMetaSize else {
             throw MapnikError.invalidInput(
-                "metaSize must be in 1...\(MetatileOptions.maxMetaSize), got \(metaSize)")
+                "metaSize must be in 1...\(Metatile.maxMetaSize), got \(metaSize)")
         }
         guard zoomRange.lowerBound >= 0, zoomRange.upperBound <= 30 else {
             throw MapnikError.invalidInput(
@@ -336,7 +336,7 @@ public struct MetatileSequence: Sequence, Sendable {
     ///   - x: Tile column.
     ///   - y: Tile row.
     ///   - zoom: Zoom level of the tile; stored on the returned origin so it
-    ///     can be passed to `Mapnik.renderMetatile(origin:metaSize:)`.
+    ///     can be passed to `Mapnik.renderMetatile(_:options:)`.
     public func metatileOrigin(forX x: Int, forY y: Int, atZoom zoom: Int) -> MapTile {
         MapTile(
             x: x - ((x % metaSize) + metaSize) % metaSize,

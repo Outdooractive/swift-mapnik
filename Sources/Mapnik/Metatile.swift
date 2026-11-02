@@ -88,7 +88,7 @@ public struct Metatile: Sendable, Hashable {
 
 }
 
-/// Options controlling metatile rendering.
+/// The pixel dimensions a metatile would have.
 ///
 /// A metatile is a block of `metaSize` × `metaSize` tiles rendered as one
 /// image in a single pass: one datasource query per layer instead of one per
@@ -96,91 +96,36 @@ public struct Metatile: Sendable, Hashable {
 /// labels no longer clip at tile edges inside the block.
 ///
 /// ```swift
-/// let options = MetatileOptions(metaSize: 4, render: .tile(format: .png()))
-/// let block = Metatile(origin: MapTile(x: 1080, y: 712, z: 11), metaSize: 4)
-/// let metatile = try map.renderMetatile(block, options: options)
+/// let block = try Metatile(origin: MapTile(x: 1080, y: 712, z: 11), metaSize: 4)
+/// let metatile = try map.renderMetatile(block, options: .tile(format: .png()))
 /// let tile = try metatile?.tile(at: MapTile(x: 1082, y: 715, z: 11)) // crop one tile
 /// ```
-public struct MetatileOptions: Sendable {
-
-    /// The number of tiles per metatile edge. 1 renders plain tiles; 4 and 8
-    /// are common tile-server values. Larger blocks reduce datasource queries
-    /// further but hold more pixels in memory.
-    ///
-    /// The maximum is 16 (a 16 × 16 metatile of 256-pixel tiles at scale 2
-    /// already holds 8192² pixels = 256 MB of RGBA data).
-    public static let maxMetaSize = Metatile.maxMetaSize
-
-    /// Tiles per metatile edge.
-    public var metaSize: Int
-
-    /// Per-tile render options: `width`/`height` are the tile edge lengths in
-    /// pixels, `scale` the scale factor, `format` the output format used when
-    /// cropping, `bufferSize` the padding applied around the whole metatile.
-    public var render: RenderOptions
-
-    /// Creates metatile options.
-    ///
-    /// The values are validated when the options are used by a render call,
-    /// so this initializer stays non-throwing (it is used as a default
-    /// argument). Call ``validated(metaSize:render:)`` when you want the error
-    /// at the point of construction.
-    public init(metaSize: Int = 4, render: RenderOptions = .tile()) {
-        self.metaSize = metaSize
-        self.render = render
-    }
-
-    /// Creates metatile options and validates them immediately.
-    ///
-    /// - Throws: `MapnikError.invalidInput` for out-of-range values.
-    public static func validated(
-        metaSize: Int = 4,
-        render: RenderOptions = .tile(),
-    ) throws -> MetatileOptions {
-        let options = MetatileOptions(metaSize: metaSize, render: render)
-        try options.validate()
-        return options
-    }
+extension Metatile {
 
     /// The metatile's pixel dimensions (`metaSize * width * scale` by
-    /// `metaSize * height * scale`).
-    public var metatileWidth: Int {
-        Int(Double(render.width) * render.scale) * metaSize
-    }
-
-    /// The metatile's pixel height (`metaSize * height * scale`).
-    public var metatileHeight: Int {
-        Int(Double(render.height) * render.scale) * metaSize
-    }
-
-    /// The metatile's pixel dimensions, assuming square tiles.
+    /// `metaSize * height * scale`) for the given render options.
     ///
-    /// Use ``metatileWidth``/``metatileHeight`` for non-square tiles.
-    public var metatileSize: Int {
-        metatileWidth
-    }
-
-    /// Validates the options, throwing `MapnikError.invalidInput` for out of
-    /// range values.
-    func validate() throws {
-        guard metaSize >= 1, metaSize <= Self.maxMetaSize else {
-            throw MapnikError.invalidInput("metaSize must be in 1...\(Self.maxMetaSize), got \(metaSize)")
-        }
-
-        try render.validate()
-        try Self.validatePixelSize(render.width, render.scale, metaSize: metaSize)
-        try Self.validatePixelSize(render.height, render.scale, metaSize: metaSize)
-    }
-
-    /// Throws when `edge * scale * metaSize` does not fit in an `Int`.
-    private static func validatePixelSize(_ edge: Int, _ scale: Double, metaSize: Int) throws {
-        let pixels = Double(edge) * scale
-        guard pixels > 0, pixels.isFinite,
-              pixels * Double(metaSize) <= Double(Int.max)
+    /// - Parameter render: The per-tile render options.
+    /// - Returns: The block's pixel width and height, or `nil` when the
+    ///   dimensions do not fit in an `Int` (for example an enormous `scale`).
+    public func pixelSize(for render: RenderOptions) -> (width: Int, height: Int)? {
+        guard let width = Self.pixels(render.width, render.scale, metaSize: metaSize),
+              let height = Self.pixels(render.height, render.scale, metaSize: metaSize)
         else {
-            throw MapnikError.invalidInput(
-                "tile size × scale × metaSize is out of range, got \(edge) × \(scale) × \(metaSize)")
+            return nil
         }
+
+        return (width, height)
+    }
+
+    /// `edge * scale * metaSize` as an `Int`, or `nil` when it does not fit.
+    private static func pixels(_ edge: Int, _ scale: Double, metaSize: Int) -> Int? {
+        let value = (Double(edge) * scale).rounded() * Double(metaSize)
+        guard value.isFinite, value > 0, value <= Double(Int.max) else {
+            return nil
+        }
+
+        return Int(value)
     }
 
 }
