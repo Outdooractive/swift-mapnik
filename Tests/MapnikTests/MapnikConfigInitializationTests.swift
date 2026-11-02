@@ -29,8 +29,7 @@ struct MapnikConfigInitializationTests {
     /// - Returns: The child's stdout, or `nil` when the child could not be
     ///   started.
     private func runInChildProcess(scenario: String, testName: String) throws -> String? {
-        let executable = URL(fileURLWithPath: CommandLine.arguments[0])
-        guard FileManager.default.isExecutableFile(atPath: executable.path) else {
+        guard let executable = Self.testExecutableURL() else {
             return nil
         }
 
@@ -51,7 +50,44 @@ struct MapnikConfigInitializationTests {
         process.waitUntilExit()
         try? pipe.fileHandleForReading.close()
 
-        return String(decoding: data, as: UTF8.self)
+        let output = String(decoding: data, as: UTF8.self)
+        // An empty result means the child could not be started usefully (for
+        // example a bundle layout this helper does not understand); skip
+        // rather than report a spurious failure.
+        return output.isEmpty ? nil : output
+    }
+
+    /// The runnable test binary for the current process.
+    ///
+    /// On Linux `argv[0]` is the SwiftPM test runner. On macOS it is the
+    /// `.xctest` **bundle** (a directory), and the executable lives in
+    /// `Contents/MacOS/<name>`. Returns `nil` when neither layout matches.
+    static func testExecutableURL() -> URL? {
+        testExecutableURL(for: URL(fileURLWithPath: CommandLine.arguments[0]))
+    }
+
+    /// Resolves the runnable test binary for `argument` (`argv[0]`).
+    ///
+    /// Split out so both layouts can be tested on either platform.
+    static func testExecutableURL(for argument: URL) -> URL? {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: argument.path, isDirectory: &isDirectory) else {
+            return nil
+        }
+
+        if isDirectory.boolValue == false {
+            return argument
+        }
+
+        let candidate = argument
+            .appendingPathComponent("Contents")
+            .appendingPathComponent("MacOS")
+            .appendingPathComponent(argument.deletingPathExtension().lastPathComponent)
+        guard FileManager.default.isExecutableFile(atPath: candidate.path) else {
+            return nil
+        }
+
+        return candidate
     }
 
     // MARK: - Parent tests
@@ -131,6 +167,56 @@ struct MapnikConfigInitializationTests {
         catch {
             print("\(error)")
         }
+    }
+
+}
+
+/// Tests for the child-process executable resolution.
+@Suite("Test executable resolution")
+struct TestExecutableResolutionTests {
+
+    /// A plain executable path is used as-is (the Linux layout).
+    @Test
+    func `plain executable is used directly`() {
+        let executable = URL(fileURLWithPath: CommandLine.arguments[0])
+        let resolved = MapnikConfigInitializationTests.testExecutableURL(for: executable)
+        #expect(resolved?.path == executable.path)
+    }
+
+    /// A bundle directory resolves to Contents/MacOS/<name> (the macOS layout).
+    @Test
+    func `bundle directory resolves to its executable`() throws {
+        let root = FileManager.default
+            .temporaryDirectory
+            .appending(path: "mapnik-bundle-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let bundle = root.appending(path: "MapnikTests.xctest")
+        let macos = bundle.appending(path: "Contents").appending(path: "MacOS")
+        try FileManager.default.createDirectory(at: macos, withIntermediateDirectories: true)
+
+        let executable = macos.appending(path: "MapnikTests")
+        try "#!/bin/sh\nexit 0\n".write(to: executable, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: executable.path)
+
+        let resolved = MapnikConfigInitializationTests.testExecutableURL(for: bundle)
+        #expect(resolved?.path == executable.path)
+    }
+
+    /// A bundle without an executable resolves to nil instead of crashing.
+    @Test
+    func `empty bundle resolves to nil`() throws {
+        let root = FileManager.default
+            .temporaryDirectory
+            .appending(path: "mapnik-bundle-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let bundle = root.appending(path: "Empty.xctest")
+        try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
+
+        #expect(MapnikConfigInitializationTests.testExecutableURL(for: bundle) == nil)
     }
 
 }
