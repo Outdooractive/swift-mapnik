@@ -35,7 +35,7 @@ struct SaveXMLTests {
         try map.setSRS("epsg:4326")
         map.setBufferSize(64)
 
-        let xml = try map.saveXML(explicitDefaults: true)
+        let xml = try map.saveXML()
 
         let reloaded = try Mapnik(xml: xml)
         #expect(reloaded.srs == "epsg:4326")
@@ -74,17 +74,32 @@ struct SaveXMLTests {
     }
 
     @Test
-    func `saveXML explicit defaults carries more attributes`() throws {
+    func `saveXML explicit defaults is rejected on affected mapnik versions`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
 
-        let plain = try map.saveXML()
-        let explicit = try map.saveXML(explicitDefaults: true)
+        // mapnik 4.0...4.2 corrupts memory when serializing with explicit
+        // defaults, so the shim rejects the combination instead of crashing.
+        // On fixed versions the output is at least as long as the plain form
+        // and still loadable.
+        do {
+            let explicit = try map.saveXML(explicitDefaults: true)
+            let plain = try map.saveXML()
+            #expect(explicit.count >= plain.count)
 
-        // The explicit form is at least as long, and both are loadable.
-        #expect(explicit.count >= plain.count)
-        let reloaded = try Mapnik(xml: explicit)
-        let data = try reloaded.renderTile(Fixtures.europeTile, format: .png())
-        #expect(data != nil)
+            let reloaded = try Mapnik(xml: explicit)
+            let data = try reloaded.renderTile(Fixtures.europeTile, format: .png())
+            #expect(data != nil)
+        }
+        catch let error as MapnikError {
+            guard case let .serializationFailed(message) = error else {
+                Issue.record("Wrong error case: \(error)")
+                return
+            }
+
+            #expect(message.contains("explicit defaults"))
+            // The plain form still works.
+            #expect(try map.saveXML().contains("<Map"))
+        }
     }
 
 }
