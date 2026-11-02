@@ -332,7 +332,7 @@ struct MapnikTests {
 
         #expect(first != nil)
         #expect(second != nil)
-        #expect(first?.count == second!.count)
+        #expect(try first?.count == #require(second?.count))
     }
 
     @Test

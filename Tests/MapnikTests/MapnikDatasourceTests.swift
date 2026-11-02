@@ -1,5 +1,7 @@
 import Foundation
+import GISTools
 @testable import Mapnik
+import MapnikC
 import Testing
 
 /// Tests for direct datasource creation + inspection (the editor UI path).
@@ -217,5 +219,53 @@ extension Fixtures {
         data.append(contentsOf: [0xFF, 0x80, 0x40, 0x00])
         return data
     }()
+
+}
+
+/// Tests for the datasource thread-safety and lifetime contracts.
+@Suite("Datasource lifetime")
+struct DatasourceLifetimeTests {
+
+    /// Datasources can be created, queried and destroyed concurrently.
+    @Test
+    func `concurrent datasource lifecycle is safe`() async throws {
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for _ in 0 ..< 8 {
+                group.addTask {
+                    let datasource = try MapnikDatasource(parameters: [
+                        ("type", "geojson"),
+                        ("inline", Fixtures.geojson),
+                    ])
+                    let info = try datasource.inspect(maxFeatures: 1, srs: "+init=epsg:4326")
+                    _ = try datasource.queryBox(info.extent, maxFeatures: 1)
+                }
+            }
+
+            try await group.waitForAll()
+        }
+    }
+
+    /// A map keeps working after the counting datasource handle is destroyed.
+    @Test
+    func `map outlives counting datasource handle`() throws {
+        let map = try Mapnik(xml: Fixtures.polygonStyle)
+        let counter = try #require(mapnik_counting_datasource_create())
+        defer { mapnik_counting_datasource_destroy(counter) }
+
+        let wkb = MetatileTests.europePolygonWKB()
+        var errorOut: UnsafeMutablePointer<CChar>? = nil
+        #expect(mapnik_counting_datasource_push_polygon(counter, wkb, UInt(wkb.count), "Europe", &errorOut))
+        #expect(errorOut == nil)
+
+        try map.withMapPointer { pointer in
+            #expect(mapnik_map_use_counting_datasource(pointer, 0, counter, &errorOut))
+        }
+        #expect(errorOut == nil)
+
+        // The layer holds a shared_ptr, so the map stays usable after the
+        // handle is destroyed: rendering must not crash or throw.
+        _ = try map.renderTile(Fixtures.europeTile, format: .png())
+        #expect(map.layerNames == ["land"])
+    }
 
 }

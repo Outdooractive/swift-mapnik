@@ -85,9 +85,27 @@ public struct MetatileOptions: Sendable {
     /// cropping, `bufferSize` the padding applied around the whole metatile.
     public var render: RenderOptions
 
+    /// Creates metatile options.
+    ///
+    /// The values are validated by ``validate()`` when the options are used,
+    /// so this initializer stays non-throwing (it is used as a default
+    /// argument). Call ``validated(metaSize:render:)`` when you want the error
+    /// at the point of construction.
     public init(metaSize: Int = 4, render: RenderOptions = .tile()) {
         self.metaSize = metaSize
         self.render = render
+    }
+
+    /// Creates metatile options and validates them immediately.
+    ///
+    /// - Throws: `MapnikError.invalidInput` for out-of-range values.
+    public static func validated(
+        metaSize: Int = 4,
+        render: RenderOptions = .tile(),
+    ) throws -> MetatileOptions {
+        let options = MetatileOptions(metaSize: metaSize, render: render)
+        try options.validate()
+        return options
     }
 
     /// The metatile's pixel dimensions (`metaSize * size * scale`).
@@ -146,10 +164,12 @@ public struct MetatileRendered: Sendable {
         guard x >= 0, x < width, y >= 0, y < height else {
             return nil
         }
+
         let offset = (y * width + x) * 4
         guard offset + 3 < rgba.count else {
             return nil
         }
+
         return [rgba[offset], rgba[offset + 1], rgba[offset + 2], rgba[offset + 3]]
     }
 

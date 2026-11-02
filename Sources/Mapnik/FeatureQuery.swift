@@ -35,6 +35,15 @@ enum FeatureQueryParser {
     ///
     /// Geometry-less features (attributes-only hits, e.g. raster datasources)
     /// are dropped: GISTools `Feature` requires a geometry.
+    /// True when `number` is one of Foundation's JSON boolean singletons.
+    ///
+    /// `JSONSerialization` returns the shared boolean instances for `true` and
+    /// `false`, so identity comparison is reliable and portable, unlike
+    /// inspecting `objCType`.
+    private static func isBooleanNumber(_ number: NSNumber) -> Bool {
+        number === NSNumber(value: true) || number === NSNumber(value: false)
+    }
+
     static func parseFeatures(json: Data) throws -> [Feature] {
         guard let document = try JSONSerialization.jsonObject(with: json, options: []) as? [String: Any],
               let rawFeatures = document["features"] as? [[String: Any]]
@@ -60,15 +69,19 @@ enum FeatureQueryParser {
                         return string
 
                     case let number as NSNumber:
-                        // JSON booleans arrive as NSNumber (objCType "c");
-                        // keep them bool, then integer when exact.
-                        if number.objCType[0] == Int8(99) { // "c" = boolean
+                        // JSON booleans arrive as NSNumber. `objCType` is a
+                        // Foundation implementation detail (and "c" also
+                        // matches small integers on some versions), so compare
+                        // against the shared boolean instances instead.
+                        if isBooleanNumber(number) {
                             return number.boolValue
                         }
+
                         let doubleValue = number.doubleValue
                         if doubleValue.rounded() == doubleValue, doubleValue >= Double(Int.min), doubleValue <= Double(Int.max) {
                             return Int(doubleValue)
                         }
+
                         return doubleValue
 
                     default:
