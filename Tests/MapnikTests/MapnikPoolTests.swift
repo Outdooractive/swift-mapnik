@@ -8,18 +8,24 @@ private func withRetry<T: Sendable>(
     maxAttempts: Int,
     operation: @Sendable () throws -> T,
 ) async throws -> T {
+    guard maxAttempts > 0 else {
+        throw MapnikPoolError.exhausted(limit: 0)
+    }
+
     for attempt in 0 ..< maxAttempts {
         do {
             return try operation()
         }
         catch MapnikPoolError.exhausted {
             if attempt == maxAttempts - 1 {
-                throw MapnikPoolError.exhausted
+                throw MapnikPoolError.exhausted(limit: 0)
             }
+
             try await Task.sleep(for: .milliseconds(5))
         }
     }
-    fatalError("unreachable")
+
+    throw MapnikPoolError.exhausted(limit: 0)
 }
 
 @Suite("MapnikPool")
@@ -73,7 +79,7 @@ struct MapnikPoolTests {
         _ = try pool.acquire()
         _ = try pool.acquire()
 
-        #expect(throws: MapnikPoolError.exhausted) {
+        #expect(throws: MapnikPoolError.exhausted(limit: 2)) {
             try pool.acquire()
         }
     }
@@ -90,6 +96,27 @@ struct MapnikPoolTests {
         pool.release(first)
         let second = try pool.acquire()
         #expect(ObjectIdentifier(first) == ObjectIdentifier(second))
+    }
+
+    @Test
+    func `double release does not hand the same object to two callers`() throws {
+        let pool = try MapnikPool(
+            factory: { try Mapnik(xml: Fixtures.polygonStyle) },
+            initialSize: 1,
+            maxPoolSize: 2,
+            maxUsesPerObject: 100)
+
+        let map = try pool.acquire()
+        pool.release(map)
+        pool.release(map) // ignored: the object is not lent out
+
+        let first = try pool.acquire()
+        #expect(ObjectIdentifier(first) == ObjectIdentifier(map))
+
+        // The second acquire must create a fresh object, not hand out `map`
+        // again while `first` is still in use.
+        let second = try pool.acquire()
+        #expect(ObjectIdentifier(second) != ObjectIdentifier(first))
     }
 
     @Test
@@ -146,6 +173,90 @@ struct MapnikPoolTests {
         #expect(throws: Boom.self) {
             _ = try MapnikPool(factory: { throw Boom() }, initialSize: 1)
         }
+    }
+
+    @Test
+    func `init rejects out of range sizes`() {
+        #expect(throws: MapnikError.self) {
+            _ = try MapnikPool(factory: { try Mapnik(xml: Fixtures.polygonStyle) }, initialSize: -1)
+        }
+        #expect(throws: MapnikError.self) {
+            _ = try MapnikPool(factory: { try Mapnik(xml: Fixtures.polygonStyle) }, maxPoolSize: 0)
+        }
+        #expect(throws: MapnikError.self) {
+            _ = try MapnikPool(factory: { try Mapnik(xml: Fixtures.polygonStyle) }, maxUsesPerObject: 0)
+        }
+        // initialSize above maxPoolSize is rejected instead of clamped.
+        #expect(throws: MapnikError.self) {
+            _ = try MapnikPool(
+                factory: { try Mapnik(xml: Fixtures.polygonStyle) },
+                initialSize: 20,
+                maxPoolSize: 10)
+        }
+    }
+
+    @Test
+    func `logger may call back into the pool`() throws {
+        // The logger used to be invoked while the pool lock was held, so a
+        // logger calling stats() deadlocked. It now runs after unlocking.
+        final class Box: @unchecked Sendable {
+
+            let lock = NSLock()
+            var pool: MapnikPool?
+
+        }
+
+        let box = Box()
+        let pool = try MapnikPool(
+            factory: { try Mapnik(xml: Fixtures.polygonStyle) },
+            initialSize: 1,
+            maxPoolSize: 2,
+            maxUsesPerObject: 100,
+            logger: { _ in
+                box.lock.lock()
+                let current = box.pool
+                box.lock.unlock()
+                _ = current?.stats()
+            })
+        box.lock.lock()
+        box.pool = pool
+        box.lock.unlock()
+
+        let map = try pool.acquire()
+        pool.release(map)
+        #expect(pool.stats().inUse == 0)
+    }
+
+    @Test
+    func `close drops idle objects and rejects further acquires`() throws {
+        let pool = try MapnikPool(
+            factory: { try Mapnik(xml: Fixtures.polygonStyle) },
+            initialSize: 2,
+            maxPoolSize: 4,
+            maxUsesPerObject: 100)
+
+        #expect(pool.stats().available == 2)
+        pool.close()
+        #expect(pool.stats().available == 0)
+
+        #expect(throws: MapnikError.self) {
+            try pool.acquire()
+        }
+    }
+
+    @Test
+    func `inUseCount is readable while objects are lent out`() throws {
+        let pool = try MapnikPool(
+            factory: { try Mapnik(xml: Fixtures.polygonStyle) },
+            initialSize: 2,
+            maxPoolSize: 4,
+            maxUsesPerObject: 100)
+
+        let map = try pool.acquire()
+        #expect(pool.inUseCount == 1)
+        #expect(pool.stats().inUse == 1)
+        pool.release(map)
+        #expect(pool.inUseCount == 0)
     }
 
 }
