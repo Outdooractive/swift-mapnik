@@ -10,6 +10,7 @@ struct FeatureQueryTests {
 
     // MARK: - Datasource box queries
 
+    /// Datasource box query returns features with attributes and geometry.
     @Test
     func `datasource box query returns features with attributes and geometry`() throws {
         let datasource = try MapnikDatasource(parameters: [
@@ -26,6 +27,7 @@ struct FeatureQueryTests {
         #expect(feature.properties["name"] as? String == "Europe")
     }
 
+    /// Datasource box query decodes the polygon geometry.
     @Test
     func `datasource box query decodes the polygon geometry`() throws {
         let datasource = try MapnikDatasource(parameters: [
@@ -48,8 +50,9 @@ struct FeatureQueryTests {
         #expect(coordinates.allSatisfy({ $0.longitude <= 40.1 }))
     }
 
+    /// Datasource box query produces a valid GeoJSON feature.
     @Test
-    func `datasource box query produces a valid GeoJSON feature`() throws {
+    func `datasource box query produces A valid geo JSON feature`() throws {
         let datasource = try MapnikDatasource(parameters: [
             ("type", "geojson"),
             ("inline", Fixtures.geojson),
@@ -65,6 +68,7 @@ struct FeatureQueryTests {
         #expect(feature.boundingBox != nil)
     }
 
+    /// Datasource box query returns empty outside the extent.
     @Test
     func `datasource box query returns empty outside the extent`() throws {
         let datasource = try MapnikDatasource(parameters: [
@@ -76,6 +80,7 @@ struct FeatureQueryTests {
         #expect(features.isEmpty)
     }
 
+    /// Datasource box query rejects invalid input.
     @Test
     func `datasource box query rejects invalid input`() throws {
         let datasource = try MapnikDatasource(parameters: [
@@ -96,8 +101,9 @@ struct FeatureQueryTests {
 
     // MARK: - Map point queries
 
+    /// Map point query finds the polygon at a coordinate inside it.
     @Test
-    func `map point query finds the polygon at a coordinate inside it`() throws {
+    func `map point query finds the polygon at A coordinate inside it`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
 
         // Inside the Europe polygon (Berlin).
@@ -108,6 +114,7 @@ struct FeatureQueryTests {
         #expect(features.first?.properties["name"] as? String == "Europe")
     }
 
+    /// Map point query returns nothing outside the polygon.
     @Test
     func `map point query returns nothing outside the polygon`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
@@ -119,6 +126,7 @@ struct FeatureQueryTests {
         #expect(features.isEmpty)
     }
 
+    /// Map point query works in raw map SRS coordinates.
     @Test
     func `map point query works in raw map SRS coordinates`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
@@ -132,6 +140,7 @@ struct FeatureQueryTests {
         #expect(features.count == 1)
     }
 
+    /// Map point query rejects invalid input.
     @Test
     func `map point query rejects invalid input`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
@@ -147,6 +156,7 @@ struct FeatureQueryTests {
         }
     }
 
+    /// Map point query respects layer visibility.
     @Test
     func `map point query rejects a coordinate in a planar projection`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
@@ -172,6 +182,7 @@ struct FeatureQueryTests {
 
     // MARK: - Hex decoding
 
+    /// Hex decoding round trips.
     @Test
     func `hex decoding round trips`() throws {
         let original: [UInt8] = [0x01, 0x03, 0xAB, 0xFF, 0x00]
@@ -181,6 +192,7 @@ struct FeatureQueryTests {
         #expect(Array(decoded) == original)
     }
 
+    /// Hex decoding rejects invalid input.
     @Test
     func `hex decoding rejects invalid input`() {
         #expect(Data(hexEncoded: "abc") == nil)

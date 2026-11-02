@@ -77,8 +77,9 @@ public struct Metatile: Sendable, Hashable {
 ///
 /// ```swift
 /// let options = MetatileOptions(metaSize: 4, render: .tile(format: .png()))
-/// let block = Metatile(origin: MapTile(x: 1080, y: 712, z: 11), metaSize: 4)
-/// let metatile = try map.renderMetatile(block, options: options)
+/// let metatile = try map.renderMetatile(
+///     Metatile(origin: MapTile(x: 1080, y: 712, z: 11), metaSize: 4),
+///     options: options)
 /// let tile = try metatile?.tile(at: MapTile(x: 1082, y: 715, z: 11)) // crop one tile
 /// ```
 public struct MetatileOptions: Sendable {

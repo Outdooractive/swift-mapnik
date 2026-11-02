@@ -104,6 +104,15 @@ public struct RenderOptions: Sendable {
     /// Output format including any format-specific options.
     public var format: ImageFormat
 
+    /// Creates render options.
+    ///
+    /// - Parameters:
+    ///   - width: Image width in pixels.
+    ///   - height: Image height in pixels.
+    ///   - bufferSize: Padding in pixels; `nil` uses the stylesheet buffer.
+    ///   - scale: Scale factor, `2.0` for @2x output.
+    ///   - skipFullyTransparent: Return `nil` for fully transparent images.
+    ///   - format: Output format.
     public init(
         width: Int = 256,
         height: Int = 256,

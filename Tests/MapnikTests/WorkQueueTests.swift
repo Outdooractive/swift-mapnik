@@ -46,6 +46,7 @@ final class WorkSource: @unchecked Sendable {
 @Suite("WorkQueue")
 struct WorkQueueTests {
 
+    /// Processes all work items.
     @Test
     func `processes all work items`() async throws {
         let source = WorkSource(Array(1 ... 50))
@@ -66,6 +67,7 @@ struct WorkQueueTests {
         #expect(source.remaining == 0)
     }
 
+    /// Results delivered for every item exactly once.
     @Test
     func `results delivered for every item exactly once`() async throws {
         let source = WorkSource(Array(1 ... 30))
@@ -85,6 +87,7 @@ struct WorkQueueTests {
         #expect(processed.value == 30)
     }
 
+    /// Max concurrency clamped to sane range.
     @Test
     func `max concurrency clamped to sane range`() async {
         let queue = WorkQueue<Int, Int>(
@@ -99,6 +102,7 @@ struct WorkQueueTests {
         #expect(await queue.maxConcurrency == 1)
     }
 
+    /// Errors from process work propagate.
     @Test
     func `errors from process work propagate`() async throws {
         struct Boom: Error {}
@@ -125,6 +129,7 @@ struct WorkQueueTests {
         }
     }
 
+    /// Errors from on result propagate.
     @Test
     func `errors from on result propagate`() async throws {
         struct Boom: Error {}
@@ -148,6 +153,7 @@ struct WorkQueueTests {
         }
     }
 
+    /// Cancellation stops queue.
     @Test
     func `queue is reusable after an error`() async throws {
         struct Boom: Error {}
@@ -220,6 +226,7 @@ struct WorkQueueTests {
         #expect(count < 1000, "expected cancellation to stop early, processed \(count)")
     }
 
+    /// Rendering through pool and queue end to end.
     @Test
     func `rendering through pool and queue end to end`() async throws {
         let pool = try MapnikPool(
