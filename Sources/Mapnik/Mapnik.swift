@@ -635,8 +635,11 @@ public final class Mapnik: @unchecked Sendable {
     /// PDF suits print/graphics workflows. If the map has no extent yet, it
     /// first zooms to the layer extent.
     ///
-    /// - Parameter scale: Scale factor for symbolizer sizes (`2.0` produces
-    ///   twice-size labels and line widths).
+    /// - Parameters:
+    ///   - width: Page width in pixels; `nil` uses the map's current width.
+    ///   - height: Page height in pixels; `nil` uses the map's current height.
+    ///   - scale: Scale factor for symbolizer sizes (`2.0` produces
+    ///     twice-size labels and line widths).
     /// - Returns: The PDF document bytes.
     /// - Throws: `MapnikError.renderingFailed` when rendering failed.
     public func renderPDF(width: Int? = nil, height: Int? = nil, scale: Double = 1.0) throws -> Data {
@@ -644,6 +647,12 @@ public final class Mapnik: @unchecked Sendable {
     }
 
     /// Renders the current map view as a PDF file.
+    ///
+    /// - Parameters:
+    ///   - url: Destination file URL; replaced if it exists.
+    ///   - width: Page width in pixels; `nil` uses the map's current width.
+    ///   - height: Page height in pixels; `nil` uses the map's current height.
+    ///   - scale: Scale factor for symbolizer sizes.
     public func renderPDF(to url: URL, width: Int? = nil, height: Int? = nil, scale: Double = 1.0) throws {
         try renderCairoSurface(.pdf, width: width, height: height, scale: scale, to: url)
     }
@@ -651,11 +660,24 @@ public final class Mapnik: @unchecked Sendable {
     /// Renders the current map view as a PostScript document.
     ///
     /// Like `renderPDF`, but emitting PostScript (`.ps`) output.
+    /// Renders the current map view as a PostScript document.
+    ///
+    /// - Parameters:
+    ///   - width: Page width in pixels; `nil` uses the map's current width.
+    ///   - height: Page height in pixels; `nil` uses the map's current height.
+    ///   - scale: Scale factor for symbolizer sizes.
+    /// - Returns: The PostScript document bytes.
     public func renderPostScript(width: Int? = nil, height: Int? = nil, scale: Double = 1.0) throws -> Data {
         try renderCairoSurface(.postScript, width: width, height: height, scale: scale)
     }
 
     /// Renders the current map view as a PostScript file.
+    ///
+    /// - Parameters:
+    ///   - url: Destination file URL; replaced if it exists.
+    ///   - width: Page width in pixels; `nil` uses the map's current width.
+    ///   - height: Page height in pixels; `nil` uses the map's current height.
+    ///   - scale: Scale factor for symbolizer sizes.
     public func renderPostScript(to url: URL, width: Int? = nil, height: Int? = nil, scale: Double = 1.0) throws {
         try renderCairoSurface(.postScript, width: width, height: height, scale: scale, to: url)
     }
