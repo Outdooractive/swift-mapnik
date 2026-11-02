@@ -156,10 +156,13 @@ try map.renderPostScript(to: url)                    // .ps output
 A metatile is a block of N×N XYZ tiles rendered as one image in a single pass. This halves (quarters, ...) the number of datasource queries — a 4×4 metatile needs one query per layer instead of 16 — and lets mapnik's label placement (collision detection) see the whole block, so labels no longer clip at tile edges inside the block. Tile servers use this technique to keep label rendering consistent across tile boundaries.
 
 ```swift
-// Render a 4×4 block starting at tile (1080, 712)
-let metatile = try map.renderMetatile(origin: MapTile(x: 1080, y: 712, z: 11), metaSize: 4)
+// A 4×4 block starting at tile (1080, 712)
+let block = try Metatile(origin: MapTile(x: 1080, y: 712, z: 11), metaSize: 4)
 
-// Crop individual tiles out of the block on demand (WebP by default)
+// Render it; RenderOptions controls the per-tile rendering only
+let metatile = try map.renderMetatile(block, options: .tile(format: .png()))
+
+// Crop individual tiles out of the block on demand
 let tile = try metatile?.tile(at: MapTile(x: 1082, y: 715, z: 11))
 try tile?.write(to: outputURL)
 
@@ -167,7 +170,7 @@ try tile?.write(to: outputURL)
 let byOffset = try metatile?.tile(dx: 2, dy: 3, format: .png256)
 ```
 
-`MetatileOptions` controls the block size (`metaSize`, 1...16) and the per-tile `RenderOptions` (tile size, scale factor, format, buffer). The rendered block is returned as a `MetatileRendered` holding the raw RGBA pixels; crop tiles out of it, then drop it. A fully transparent block returns `nil`, like `renderTile`.
+The block size comes from `Metatile.metaSize` (1...16); `RenderOptions` only controls the per-tile rendering (tile size, scale factor, format, buffer), so there is a single source of truth for the block dimensions. The rendered block is returned as a `MetatileRendered` holding the raw RGBA pixels; crop tiles out of it, then drop it. A fully transparent block returns `nil`, like `renderTile`.
 
 Like `renderTile`, the block is always rendered in Web Mercator XYZ geometry regardless of the map's SRS. The buffer (padding) applies around the whole block, not per tile — raise `bufferSize` if edge padding matters for your style.
 
@@ -391,7 +394,7 @@ Sources/Mapnik/
 ├── Mapnik.swift          # map lifecycle, tile/metatile/free-form/vector
 │                         #   rendering, XML round trip, layers, palettes
 ├── RenderOptions.swift   # ImageFormat + RenderOptions
-├── Metatile.swift        # Metatile, MetatileOptions, MetatileRendered
+├── Metatile.swift        # Metatile, MetatileRendered
 ├── MapnikConfig.swift    # one-time global init (plugins + fonts)
 ├── MapnikDatasource.swift# datasource from parameters + inspect()
 ├── MapnikError.swift     # error type bridging the C error strings

@@ -33,8 +33,8 @@ Sources/Mapnik/
 ├── Mapnik.swift         # public entry point: stylesheet loading, tile
 │                        #   rendering, free-form rendering, SVG/PDF/PS,
 │                        #   layers, palettes, metatile rendering, XML round trip
-├── Metatile.swift       # Metatile block descriptor, MetatileOptions,
-│                        #   MetatileRendered (crop + encode from raw RGBA)
+├── Metatile.swift       # Metatile block descriptor, MetatileRendered
+│                        #   (crop + encode from raw RGBA)
 ├── RenderOptions.swift  # ImageFormat (mapnik type strings) + RenderOptions
 ├── MapnikConfig.swift   # one-time global init (plugin + font paths)
 ├── MapnikDatasource.swift # datasource from parameters + inspect() → DatasourceInfo

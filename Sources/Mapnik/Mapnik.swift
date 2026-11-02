@@ -354,6 +354,11 @@ public final class Mapnik: @unchecked Sendable {
     /// The individual tiles are cropped out of the returned
     /// `MetatileRendered` on demand.
     ///
+    /// The block's size comes from `metatile.metaSize`; `options` only
+    /// controls the per-tile rendering (size, scale, format, buffer). Only the
+    /// origin and block size of `metatile` matter here — its tile list is
+    /// ignored, so crop what you need from the result.
+    ///
     /// Like `renderTile`, the block is always rendered in Web Mercator XYZ
     /// geometry regardless of the map's `srs`. The render options' buffer
     /// (padding) applies around the whole block, not per tile — with the
@@ -363,54 +368,22 @@ public final class Mapnik: @unchecked Sendable {
     /// style.
     ///
     /// - Parameters:
-    ///   - origin: The block's top-left (north-west) tile.
-    ///   - metaSize: Tiles per metatile edge, 1...16.
-    ///   - options: Per-tile render options (tile size, scale, format, buffer).
+    ///   - metatile: The block to render; only `origin` and `metaSize` are
+    ///     used.
+    ///   - options: Per-tile render options (tile size, scale, format,
+    ///     buffer).
     /// - Returns: The rendered metatile, or `nil` if the whole block is fully
     ///   transparent and `skipFullyTransparent` is set.
     /// - Throws: `MapnikError.invalidInput` for out-of-range tiles or options,
     ///   `MapnikError.renderingFailed` if rendering failed.
     public func renderMetatile(
-        origin: MapTile,
-        metaSize: Int,
-        options: RenderOptions = .tile(),
-    ) throws -> MetatileRendered? {
-        guard metaSize >= 1, metaSize <= MetatileOptions.maxMetaSize else {
-            throw MapnikError.invalidInput(
-                "metaSize must be in 1...\(MetatileOptions.maxMetaSize), got \(metaSize)")
-        }
-
-        return try renderMetatile(Metatile(
-            origin: origin,
-            metaSize: metaSize,
-            tiles: []), options: options)
-    }
-
-    /// Renders the tiles of a `Metatile` block in one pass.
-    ///
-    /// Only the origin and block size of `metatile` matter for rendering;
-    /// its tile list is ignored (crop what you need from the result).
-    public func renderMetatile(
         _ metatile: Metatile,
         options: RenderOptions = .tile(),
-    ) throws -> MetatileRendered? {
-        try renderMetatile(metatile, options: MetatileOptions(metaSize: metatile.metaSize, render: options))
-    }
-
-    /// Renders a metatile with full option control.
-    public func renderMetatile(
-        _ metatile: Metatile,
-        options: MetatileOptions,
     ) throws -> MetatileRendered? {
         try options.validate()
-        guard options.metaSize == metatile.metaSize else {
-            throw MapnikError.invalidInput(
-                "options.metaSize (\(options.metaSize)) does not match the metatile's metaSize (\(metatile.metaSize))")
-        }
+        try validateMetatile(metatile, options: options)
 
-        try validateMetatile(metatile)
-
-        let previousBuffer = applyBuffer(options.render.bufferSize)
+        let previousBuffer = applyBuffer(options.bufferSize)
         defer {
             if let previousBuffer {
                 setBufferSize(previousBuffer)
@@ -429,11 +402,11 @@ public final class Mapnik: @unchecked Sendable {
                 Int32(clamping: metatile.origin.x),
                 Int32(clamping: metatile.origin.y),
                 Int32(clamping: metatile.origin.z),
-                Int32(clamping: options.render.width),
-                Int32(clamping: options.render.height),
-                options.render.scale,
-                Int32(clamping: options.metaSize),
-                options.render.skipFullyTransparent,
+                Int32(clamping: options.width),
+                Int32(clamping: options.height),
+                options.scale,
+                Int32(clamping: metatile.metaSize),
+                options.skipFullyTransparent,
                 &data,
                 &size,
                 &width,
@@ -446,7 +419,7 @@ public final class Mapnik: @unchecked Sendable {
             throw MapnikError.renderingFailed("metatile render produced no output")
         }
 
-        if isEmpty, options.render.skipFullyTransparent {
+        if isEmpty, options.skipFullyTransparent {
             if let data {
                 mapnik_free_buffer(data)
             }
@@ -467,8 +440,8 @@ public final class Mapnik: @unchecked Sendable {
 
         return MetatileRendered(
             origin: metatile.origin,
-            metaSize: options.metaSize,
-            options: options.render,
+            metaSize: metatile.metaSize,
+            options: options,
             width: Int(width),
             height: Int(height),
             isFullyTransparent: isEmpty,
@@ -1270,7 +1243,7 @@ public final class Mapnik: @unchecked Sendable {
 
     /// Throws `MapnikError.invalidInput` unless the whole metatile block is
     /// inside the XYZ grid.
-    private func validateMetatile(_ metatile: Metatile) throws {
+    private func validateMetatile(_ metatile: Metatile, options: RenderOptions) throws {
         try validateTile(metatile.origin)
         let count = 1 << metatile.origin.z
         guard metatile.origin.x + metatile.metaSize <= count,
@@ -1279,6 +1252,15 @@ public final class Mapnik: @unchecked Sendable {
             throw MapnikError.invalidInput(
                 "metatile block (\(metatile.origin.x), \(metatile.origin.y)) + "
                     + "\(metatile.metaSize)×\(metatile.metaSize) exceeds the tile grid for zoom \(metatile.origin.z)")
+        }
+
+        // Guard against a block whose pixel buffer would not fit in memory.
+        guard let pixels = metatile.pixelSize(for: options),
+              Int64(pixels.width) * Int64(pixels.height) * 4 <= Int64(Int32.max)
+        else {
+            throw MapnikError.invalidInput(
+                "metatile pixel size for \(options.width)×\(options.height) at scale "
+                    + "\(options.scale) is out of range")
         }
     }
 

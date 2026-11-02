@@ -357,7 +357,7 @@ struct MapnikTests {
         _ = try map.renderPNG256(colors: [0xFFFF_0000])
         #expect(map.bufferSize == 16)
 
-        _ = try map.renderMetatile(origin: Fixtures.europeTile, metaSize: 2, options: RenderOptions(width: 256, height: 256, bufferSize: 32, format: .png()))
+        _ = try map.renderMetatile(Metatile(origin: Fixtures.europeTile, metaSize: 2), options: RenderOptions(width: 256, height: 256, bufferSize: 32, format: .png()))
         #expect(map.bufferSize == 16)
 
         // Renders without an explicit buffer keep the stylesheet's value.
