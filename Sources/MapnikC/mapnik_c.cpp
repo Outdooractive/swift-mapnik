@@ -124,14 +124,20 @@ std::mutex& mapnik_lifecycle_mutex() {
 
 /// True when this mapnik build can serialize a map with explicit defaults.
 ///
-/// mapnik 4.2.x corrupts memory inside `save_map_to_string` /
+/// mapnik 4.0 ... 4.2 corrupt memory inside `save_map_to_string` /
 /// `save_map` when `explicit_defaults` is true: depending on the map it
 /// segfaults or throws `std::bad_alloc` / `std::length_error` from
 /// `std::string`. The failure is not catchable, so the combination is
 /// rejected up front instead of taking the caller's process down.
+///
+/// The version comparison is written out by hand because mapnik 3.1 does not
+/// define `MAPNIK_VERSION_AT_LEAST` or `MAPNIK_VERSION_ENCODE`.
 bool mapnik_explicit_defaults_supported() {
-#if MAPNIK_VERSION_AT_LEAST(4, 0, 0) && !MAPNIK_VERSION_AT_LEAST(4, 3, 0)
-    return false;
+#if defined(MAPNIK_MAJOR_VERSION) && defined(MAPNIK_MINOR_VERSION)
+    constexpr int major = MAPNIK_MAJOR_VERSION;
+    constexpr int minor = MAPNIK_MINOR_VERSION;
+    constexpr bool affected = (major == 4) && (minor <= 2);
+    return !affected;
 #else
     return true;
 #endif
