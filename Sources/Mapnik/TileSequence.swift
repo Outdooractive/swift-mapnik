@@ -33,24 +33,89 @@ public struct TileSequence: Sequence, Sendable {
 
     }
 
+    /// The bounding box the tiles cover, in WGS 84 degrees.
     public let bounds: BoundingBox
+
+    /// The zoom levels to visit, 0...30.
     public let zoomRange: ClosedRange<Int>
+
+    /// The order in which zoom levels are visited.
     public let zoomOrder: ZoomOrder
 
+    /// Creates a tile sequence.
+    ///
+    /// - Parameters:
+    ///   - bounds: The area to cover, in WGS 84 degrees.
+    ///   - zoomRange: The zoom levels to visit, 0...30.
+    ///   - zoomOrder: The order in which zoom levels are visited.
+    /// - Throws: `MapnikError.invalidInput` when the zoom range is out of
+    ///   range.
     public init(
         bounds: BoundingBox,
         zoomRange: ClosedRange<Int>,
         zoomOrder: ZoomOrder = .descending,
-    ) {
-        precondition(zoomRange.lowerBound >= 0 && zoomRange.upperBound <= 30, "zoom range out of range")
+    ) throws {
+        guard zoomRange.lowerBound >= 0, zoomRange.upperBound <= 30 else {
+            throw MapnikError.invalidInput(
+                "zoom range must be in 0...30, got \(zoomRange.lowerBound)...\(zoomRange.upperBound)")
+        }
+        guard bounds.isGeographic else {
+            throw MapnikError.invalidInput("bounds must be in WGS 84 degrees")
+        }
 
         self.bounds = bounds
         self.zoomRange = zoomRange
         self.zoomOrder = zoomOrder
     }
 
+    /// Returns an iterator over the tiles.
     public func makeIterator() -> Iterator {
         Iterator(self)
+    }
+
+    /// The inclusive min/max tile coordinates at a zoom level.
+    ///
+    /// For a bounding box that crosses the antimeridian the tiles are not
+    /// contiguous in `x`; use ``tileRanges(atZoom:)`` for those.
+    public func tileRange(atZoom zoom: Int) -> (min: MapTile, max: MapTile) {
+        let ranges = tileRanges(atZoom: zoom)
+        let min = ranges.map(\.min).reduce(ranges[0].min) { lhs, rhs in
+            MapTile(x: Swift.min(lhs.x, rhs.x), y: Swift.min(lhs.y, rhs.y), z: zoom)
+        }
+        let max = ranges.map(\.max).reduce(ranges[0].max) { lhs, rhs in
+            MapTile(x: Swift.max(lhs.x, rhs.x), y: Swift.max(lhs.y, rhs.y), z: zoom)
+        }
+        return (min, max)
+    }
+
+    /// The inclusive tile ranges at a zoom level, in visit order.
+    ///
+    /// A bounding box that does not cross the antimeridian produces exactly
+    /// one range. A box that does (e.g. 170°E ... 170°W) produces two: the
+    /// eastern strip and the western strip, instead of incorrectly spanning
+    /// the whole world.
+    public func tileRanges(atZoom zoom: Int) -> [(min: MapTile, max: MapTile)] {
+        let southWest = MapTile(coordinate: bounds.southWest, atZoom: zoom)
+        let northEast = MapTile(coordinate: bounds.northEast, atZoom: zoom)
+
+        let minY = Swift.min(southWest.y, northEast.y)
+        let maxY = Swift.max(southWest.y, northEast.y)
+
+        func range(minX: Int, maxX: Int) -> (min: MapTile, max: MapTile) {
+            (MapTile(x: minX, y: minY, z: zoom), MapTile(x: maxX, y: maxY, z: zoom))
+        }
+
+        // `MapTile(coordinate:atZoom:)` wraps longitudes into 0 ..< 2^zoom, so
+        // a box crossing the antimeridian yields minX > maxX.
+        if southWest.x <= northEast.x {
+            return [range(minX: southWest.x, maxX: northEast.x)]
+        }
+
+        let last = (1 << zoom) - 1
+        return [
+            range(minX: southWest.x, maxX: last),
+            range(minX: 0, maxX: northEast.x),
+        ]
     }
 
     /// The number of tiles in this sequence.
@@ -61,26 +126,11 @@ public struct TileSequence: Sequence, Sendable {
     public var count: Int {
         var total = 0
         for zoom in zoomRange {
-            let range = tileRange(atZoom: zoom)
-            total += (range.max.x - range.min.x + 1) * (range.max.y - range.min.y + 1)
+            for range in tileRanges(atZoom: zoom) {
+                total += (range.max.x - range.min.x + 1) * (range.max.y - range.min.y + 1)
+            }
         }
         return total
-    }
-
-    /// The inclusive min/max tile coordinates at a zoom level.
-    public func tileRange(atZoom zoom: Int) -> (min: MapTile, max: MapTile) {
-        let southWest = MapTile(coordinate: bounds.southWest, atZoom: zoom)
-        let northEast = MapTile(coordinate: bounds.northEast, atZoom: zoom)
-
-        let min = MapTile(
-            x: Swift.min(southWest.x, northEast.x),
-            y: Swift.min(southWest.y, northEast.y),
-            z: zoom)
-        let max = MapTile(
-            x: Swift.max(southWest.x, northEast.x),
-            y: Swift.max(southWest.y, northEast.y),
-            z: zoom)
-        return (min, max)
     }
 
     // MARK: - Iterator
@@ -89,8 +139,8 @@ public struct TileSequence: Sequence, Sendable {
 
         private let sequence: TileSequence
         private var zoomIndex: Int
-        private var minTile: MapTile
-        private var maxTile: MapTile
+        private var rangeIndex: Int
+        private var ranges: [(min: MapTile, max: MapTile)]
         private var currentX: Int
         private var currentY: Int
         private var isFinished = false
@@ -98,34 +148,47 @@ public struct TileSequence: Sequence, Sendable {
         fileprivate init(_ sequence: TileSequence) {
             self.sequence = sequence
             self.zoomIndex = 0
+            self.rangeIndex = 0
 
             let firstZoom = sequence.zoomLevels.first ?? 0
-            let range = sequence.tileRange(atZoom: firstZoom)
-            self.minTile = range.min
-            self.maxTile = range.max
-            self.currentX = range.min.x
-            self.currentY = range.min.y
+            self.ranges = sequence.tileRanges(atZoom: firstZoom)
+            self.currentX = ranges[0].min.x
+            self.currentY = ranges[0].min.y
         }
 
+        /// Returns the next tile, or `nil` when the sequence is exhausted.
         public mutating func next() -> MapTile? {
             if isFinished {
                 return nil
             }
 
-            let tile = MapTile(x: currentX, y: currentY, z: minTile.z)
+            let range = ranges[rangeIndex]
+            let tile = MapTile(x: currentX, y: currentY, z: range.min.z)
 
-            // Advance the cursor (row-major order), moving to the next zoom
-            // level after the last row.
+            // Advance the cursor (row-major order), moving to the next range
+            // (antimeridian split) and then the next zoom level after the last
+            // row.
             currentX += 1
-            if currentX > maxTile.x {
-                currentX = minTile.x
+            if currentX > range.max.x {
+                currentX = range.min.x
                 currentY += 1
-                if currentY > maxTile.y {
-                    advanceZoom()
+                if currentY > range.max.y {
+                    advanceRange()
                 }
             }
 
             return tile
+        }
+
+        private mutating func advanceRange() {
+            rangeIndex += 1
+            if rangeIndex < ranges.count {
+                currentX = ranges[rangeIndex].min.x
+                currentY = ranges[rangeIndex].min.y
+                return
+            }
+
+            advanceZoom()
         }
 
         private mutating func advanceZoom() {
@@ -136,11 +199,10 @@ public struct TileSequence: Sequence, Sendable {
                 return
             }
 
-            let range = sequence.tileRange(atZoom: zoomLevels[zoomIndex])
-            minTile = range.min
-            maxTile = range.max
-            currentX = range.min.x
-            currentY = range.min.y
+            ranges = sequence.tileRanges(atZoom: zoomLevels[zoomIndex])
+            rangeIndex = 0
+            currentX = ranges[0].min.x
+            currentY = ranges[0].min.y
         }
 
     }
@@ -164,6 +226,7 @@ public final class TileGenerator: @unchecked Sendable {
     private let lock = NSLock()
     private var iterator: TileSequence.Iterator
 
+    /// Creates a generator for `sequence`.
     public init(_ sequence: TileSequence) {
         self.sequence = sequence
         self.iterator = sequence.makeIterator()
@@ -212,18 +275,42 @@ public struct MetatileSequence: Sequence, Sendable {
 
     /// Number of tiles per metatile edge, 1...16.
     public let metaSize: Int
+
+    /// The bounding box the blocks cover, in WGS 84 degrees.
     public let bounds: BoundingBox
+
+    /// The zoom levels to visit, 0...30.
     public let zoomRange: ClosedRange<Int>
+
+    /// The order in which zoom levels are visited.
     public let zoomOrder: TileSequence.ZoomOrder
 
+    /// Creates a metatile sequence.
+    ///
+    /// - Parameters:
+    ///   - bounds: The area to cover, in WGS 84 degrees.
+    ///   - zoomRange: The zoom levels to visit, 0...30.
+    ///   - metaSize: Tiles per metatile edge, 1...``MetatileOptions/maxMetaSize``.
+    ///   - zoomOrder: The order in which zoom levels are visited.
+    /// - Throws: `MapnikError.invalidInput` when `metaSize` or the zoom range
+    ///   is out of range.
     public init(
         bounds: BoundingBox,
         zoomRange: ClosedRange<Int>,
         metaSize: Int = 4,
         zoomOrder: TileSequence.ZoomOrder = .descending,
-    ) {
-        precondition(metaSize >= 1, "metaSize must be positive")
-        precondition(zoomRange.lowerBound >= 0 && zoomRange.upperBound <= 30, "zoom range out of range")
+    ) throws {
+        guard metaSize >= 1, metaSize <= MetatileOptions.maxMetaSize else {
+            throw MapnikError.invalidInput(
+                "metaSize must be in 1...\(MetatileOptions.maxMetaSize), got \(metaSize)")
+        }
+        guard zoomRange.lowerBound >= 0, zoomRange.upperBound <= 30 else {
+            throw MapnikError.invalidInput(
+                "zoom range must be in 0...30, got \(zoomRange.lowerBound)...\(zoomRange.upperBound)")
+        }
+        guard bounds.isGeographic else {
+            throw MapnikError.invalidInput("bounds must be in WGS 84 degrees")
+        }
 
         self.metaSize = metaSize
         self.bounds = bounds
@@ -231,6 +318,7 @@ public struct MetatileSequence: Sequence, Sendable {
         self.zoomOrder = zoomOrder
     }
 
+    /// Returns an iterator over the tiles.
     public func makeIterator() -> Iterator {
         Iterator(self)
     }
@@ -242,37 +330,72 @@ public struct MetatileSequence: Sequence, Sendable {
     }
 
     /// The aligned metatile origin (tile coordinates floored to a multiple of
-    /// `metaSize`) covering the tile at (x, y).
-    public func metatileOrigin(forX x: Int, forY y: Int) -> MapTile {
-        MapTile(x: x - ((x % metaSize) + metaSize) % metaSize, y: y - ((y % metaSize) + metaSize) % metaSize, z: 0)
+    /// `metaSize`) covering the tile at (x, y) at `zoom`.
+    ///
+    /// - Parameters:
+    ///   - x: Tile column.
+    ///   - y: Tile row.
+    ///   - zoom: Zoom level of the tile; stored on the returned origin so it
+    ///     can be passed to `Mapnik.renderMetatile(origin:metaSize:)`.
+    public func metatileOrigin(forX x: Int, forY y: Int, atZoom zoom: Int) -> MapTile {
+        MapTile(
+            x: x - ((x % metaSize) + metaSize) % metaSize,
+            y: y - ((y % metaSize) + metaSize) % metaSize,
+            z: zoom)
     }
 
     /// The number of metatile blocks in this sequence.
     public var count: Int {
         var total = 0
         for zoom in zoomLevels {
-            let range = tileRange(atZoom: zoom)
-            let xBlocks = blockCount(from: range.min.x, to: range.max.x)
-            let yBlocks = blockCount(from: range.min.y, to: range.max.y)
-            total += xBlocks * yBlocks
+            for range in tileRanges(atZoom: zoom) {
+                let xBlocks = blockCount(from: range.min.x, to: range.max.x)
+                let yBlocks = blockCount(from: range.min.y, to: range.max.y)
+                total += xBlocks * yBlocks
+            }
         }
         return total
     }
 
     /// The inclusive min/max tile coordinates at a zoom level.
+    ///
+    /// For a bounding box that crosses the antimeridian the tiles are not
+    /// contiguous in `x`; use ``tileRanges(atZoom:)`` for those.
     public func tileRange(atZoom zoom: Int) -> (min: MapTile, max: MapTile) {
+        let ranges = tileRanges(atZoom: zoom)
+        let min = ranges.map(\.min).reduce(ranges[0].min) { lhs, rhs in
+            MapTile(x: Swift.min(lhs.x, rhs.x), y: Swift.min(lhs.y, rhs.y), z: zoom)
+        }
+        let max = ranges.map(\.max).reduce(ranges[0].max) { lhs, rhs in
+            MapTile(x: Swift.max(lhs.x, rhs.x), y: Swift.max(lhs.y, rhs.y), z: zoom)
+        }
+        return (min, max)
+    }
+
+    /// The inclusive tile ranges at a zoom level, in visit order.
+    ///
+    /// A bounding box that crosses the antimeridian produces two ranges
+    /// instead of incorrectly spanning the whole world.
+    public func tileRanges(atZoom zoom: Int) -> [(min: MapTile, max: MapTile)] {
         let southWest = MapTile(coordinate: bounds.southWest, atZoom: zoom)
         let northEast = MapTile(coordinate: bounds.northEast, atZoom: zoom)
 
-        let min = MapTile(
-            x: Swift.min(southWest.x, northEast.x),
-            y: Swift.min(southWest.y, northEast.y),
-            z: zoom)
-        let max = MapTile(
-            x: Swift.max(southWest.x, northEast.x),
-            y: Swift.max(southWest.y, northEast.y),
-            z: zoom)
-        return (min, max)
+        let minY = Swift.min(southWest.y, northEast.y)
+        let maxY = Swift.max(southWest.y, northEast.y)
+
+        func range(minX: Int, maxX: Int) -> (min: MapTile, max: MapTile) {
+            (MapTile(x: minX, y: minY, z: zoom), MapTile(x: maxX, y: maxY, z: zoom))
+        }
+
+        if southWest.x <= northEast.x {
+            return [range(minX: southWest.x, maxX: northEast.x)]
+        }
+
+        let last = (1 << zoom) - 1
+        return [
+            range(minX: southWest.x, maxX: last),
+            range(minX: 0, maxX: northEast.x),
+        ]
     }
 
     /// Number of aligned metatile blocks needed to cover tiles
@@ -289,26 +412,25 @@ public struct MetatileSequence: Sequence, Sendable {
 
         private let sequence: MetatileSequence
         private var zoomIndex: Int
+        private var rangeIndex: Int
+        private var ranges: [(min: MapTile, max: MapTile)]
         private var blockX: Int
         private var blockY: Int
         private var maxBlockX: Int
         private var maxBlockY: Int
-        private var minTile: MapTile
-        private var maxTile: MapTile
         private var isFinished = false
 
         fileprivate init(_ sequence: MetatileSequence) {
             self.sequence = sequence
             self.zoomIndex = 0
+            self.rangeIndex = 0
 
             let firstZoom = sequence.zoomLevels.first ?? 0
-            let range = sequence.tileRange(atZoom: firstZoom)
-            self.minTile = range.min
-            self.maxTile = range.max
-            self.blockX = Self.floorToBlock(range.min.x, sequence.metaSize)
-            self.blockY = Self.floorToBlock(range.min.y, sequence.metaSize)
-            self.maxBlockX = Self.floorToBlock(range.max.x, sequence.metaSize)
-            self.maxBlockY = Self.floorToBlock(range.max.y, sequence.metaSize)
+            self.ranges = sequence.tileRanges(atZoom: firstZoom)
+            self.blockX = Self.floorToBlock(ranges[0].min.x, sequence.metaSize)
+            self.blockY = Self.floorToBlock(ranges[0].min.y, sequence.metaSize)
+            self.maxBlockX = Self.floorToBlock(ranges[0].max.x, sequence.metaSize)
+            self.maxBlockY = Self.floorToBlock(ranges[0].max.y, sequence.metaSize)
         }
 
         public mutating func next() -> Metatile? {
@@ -316,25 +438,41 @@ public struct MetatileSequence: Sequence, Sendable {
                 return nil
             }
 
-            let origin = MapTile(x: blockX, y: blockY, z: minTile.z)
+            let range = ranges[rangeIndex]
+            let origin = MapTile(x: blockX, y: blockY, z: range.min.z)
             let tiles = Self.tilesForBlock(
                 origin: origin,
                 metaSize: sequence.metaSize,
-                minTile: minTile,
-                maxTile: maxTile)
+                minTile: range.min,
+                maxTile: range.max)
 
-            // Advance to the next block (row-major), moving to the next zoom
-            // level after the last row of blocks.
+            // Advance to the next block (row-major), moving to the next range
+            // (antimeridian split) and then the next zoom level after the last
+            // row of blocks.
             blockX += sequence.metaSize
             if blockX > maxBlockX {
-                blockX = Self.floorToBlock(minTile.x, sequence.metaSize)
+                blockX = Self.floorToBlock(range.min.x, sequence.metaSize)
                 blockY += sequence.metaSize
                 if blockY > maxBlockY {
-                    advanceZoom()
+                    advanceRange()
                 }
             }
 
-            return Metatile(origin: origin, metaSize: sequence.metaSize, tiles: tiles)
+            return Metatile(uncheckedOrigin: origin, metaSize: sequence.metaSize, tiles: tiles)
+        }
+
+        private mutating func advanceRange() {
+            rangeIndex += 1
+            if rangeIndex < ranges.count {
+                let range = ranges[rangeIndex]
+                blockX = Self.floorToBlock(range.min.x, sequence.metaSize)
+                blockY = Self.floorToBlock(range.min.y, sequence.metaSize)
+                maxBlockX = Self.floorToBlock(range.max.x, sequence.metaSize)
+                maxBlockY = Self.floorToBlock(range.max.y, sequence.metaSize)
+                return
+            }
+
+            advanceZoom()
         }
 
         private mutating func advanceZoom() {
@@ -345,9 +483,9 @@ public struct MetatileSequence: Sequence, Sendable {
                 return
             }
 
-            let range = sequence.tileRange(atZoom: zoomLevels[zoomIndex])
-            minTile = range.min
-            maxTile = range.max
+            ranges = sequence.tileRanges(atZoom: zoomLevels[zoomIndex])
+            rangeIndex = 0
+            let range = ranges[0]
             blockX = Self.floorToBlock(range.min.x, sequence.metaSize)
             blockY = Self.floorToBlock(range.min.y, sequence.metaSize)
             maxBlockX = Self.floorToBlock(range.max.x, sequence.metaSize)
@@ -396,6 +534,7 @@ public final class MetatileGenerator: @unchecked Sendable {
     private var iterator: MetatileSequence.Iterator
     private let sequence: MetatileSequence
 
+    /// Creates a generator for `sequence`.
     public init(_ sequence: MetatileSequence) {
         self.sequence = sequence
         self.iterator = sequence.makeIterator()

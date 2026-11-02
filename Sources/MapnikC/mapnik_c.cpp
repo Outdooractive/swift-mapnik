@@ -43,14 +43,17 @@
 #include <mapnik/well_known_srs.hpp>
 #include <mapnik/wkb.hpp>
 #include <mapnik/util/geometry_to_wkb.hpp>
+#include <mapnik/version.hpp>
 
 #include <cstdio>
 #include <cstring>
+#include <cmath>
 #include <exception>
 #include <algorithm>
 #include <atomic>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -58,6 +61,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
 
@@ -109,12 +113,58 @@ public:
     mutable std::atomic<int> point_query_count{0};
 };
 
+/// True when `path` names an existing directory.
+bool is_directory(std::string const& path) {
+    struct stat info;
+    if (::stat(path.c_str(), &info) != 0) {
+        return false;
+    }
+    return S_ISDIR(info.st_mode);
+}
+
+/// True when `path` (or a subdirectory) contains at least one `.input` plugin.
+bool has_plugin_files(std::string const& path) {
+    namespace fs = std::filesystem;
+    std::error_code error;
+    for (fs::recursive_directory_iterator it(path, error), end; it != end; it.increment(error)) {
+        if (error) {
+            return false;
+        }
+        std::string const& name = it->path().filename().string();
+        if (name.size() > 6 && name.compare(name.size() - 6, 6, ".input") == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /// Serializes map/datasource creation and stylesheet loading. Mapnik's
 /// datasource and font registries are global mutable state and not
 /// thread-safe; rendering itself stays parallel and lock-free.
 std::mutex& mapnik_lifecycle_mutex() {
     static std::mutex mutex;
     return mutex;
+}
+
+/// True when this mapnik build can serialize a map with explicit defaults.
+///
+/// mapnik 4.0 ... 4.2 corrupt memory inside `save_map_to_string` /
+/// `save_map` when `explicit_defaults` is true: depending on the map it
+/// segfaults or throws `std::bad_alloc` / `std::length_error` from
+/// `std::string`. The failure is not catchable, so the combination is
+/// rejected up front instead of taking the caller's process down.
+///
+/// The version comparison is written out by hand because mapnik 3.1 does not
+/// define `MAPNIK_VERSION_AT_LEAST` or `MAPNIK_VERSION_ENCODE`.
+bool mapnik_explicit_defaults_supported() {
+#if defined(MAPNIK_MAJOR_VERSION) && defined(MAPNIK_MINOR_VERSION)
+    constexpr int major = MAPNIK_MAJOR_VERSION;
+    constexpr int minor = MAPNIK_MINOR_VERSION;
+    constexpr bool affected = (major == 4) && (minor <= 2);
+    return !affected;
+#else
+    return true;
+#endif
 }
 
 namespace {
@@ -183,12 +233,40 @@ bool validate_tile_coordinates(int tile_x, int tile_y, int zoom, char** error_ou
     return true;
 }
 
+/// Check that a whole `meta_size` × `meta_size` block starting at
+/// (`tile_x`, `tile_y`) lies inside the tile grid for `zoom`.
+bool validate_metatile_coordinates(int tile_x, int tile_y, int zoom, int meta_size,
+                                   char** error_out) {
+    if (!validate_tile_coordinates(tile_x, tile_y, zoom, error_out)) {
+        return false;
+    }
+    long long const tile_count = 1LL << zoom;
+    long long const max_x = static_cast<long long>(tile_x) + meta_size;
+    long long const max_y = static_cast<long long>(tile_y) + meta_size;
+    if (max_x > tile_count || max_y > tile_count) {
+        std::ostringstream message;
+        message << "metatile block (" << tile_x << ", " << tile_y << ") + "
+                << meta_size << "x" << meta_size
+                << " exceeds the tile grid for zoom " << zoom;
+        return report_error(error_out, message.str());
+    }
+    return true;
+}
+
 /// Bounding box of an XYZ tile in Web Mercator coordinates.
-mapnik::box2d<double> tile_bounding_box(int tile_x, int tile_y, int zoom, int tile_size) {
-    double const resolution = kWebMercatorExtent / (static_cast<double>(tile_size) * (1LL << zoom));
-    double const min_x = -kWebMercatorExtent / 2.0 + tile_x * tile_size * resolution;
-    double const min_y = kWebMercatorExtent / 2.0 - (tile_y + 1) * tile_size * resolution;
-    return mapnik::box2d<double>(min_x, min_y, min_x + tile_size * resolution, min_y + tile_size * resolution);
+///
+/// The XYZ grid is defined purely by the zoom level: tile (`x`, `y`) at zoom
+/// `z` always covers the same geographic area, independent of the output pixel
+/// size. `tile_width`/`tile_height` therefore only affect the aspect ratio of
+/// the rendered image, not the covered extent.
+mapnik::box2d<double> tile_bounding_box(int tile_x, int tile_y, int zoom,
+                                        int tile_width, int tile_height) {
+    (void)tile_width;
+    (void)tile_height;
+    double const cell = kWebMercatorExtent / static_cast<double>(1LL << zoom);
+    double const min_x = -kWebMercatorExtent / 2.0 + tile_x * cell;
+    double const min_y = kWebMercatorExtent / 2.0 - (tile_y + 1) * cell;
+    return mapnik::box2d<double>(min_x, min_y, min_x + cell, min_y + cell);
 }
 
 /// True if every alpha byte is zero. Honors row padding and premultiplication.
@@ -215,9 +293,13 @@ bool is_fully_transparent(mapnik::image_rgba8 const& image) {
 
 /// Render the current map view into a fresh RGBA image.
 std::unique_ptr<mapnik::image_rgba8> render_view(mapnik::Map const& map, double scale_factor) {
-    auto image = std::make_unique<mapnik::image_rgba8>(
-        static_cast<int>(map.width() * scale_factor),
-        static_cast<int>(map.height() * scale_factor));
+    int const width = static_cast<int>(map.width() * scale_factor);
+    int const height = static_cast<int>(map.height() * scale_factor);
+    if (width <= 0 || height <= 0) {
+        throw std::runtime_error("render dimensions must be positive");
+    }
+
+    auto image = std::make_unique<mapnik::image_rgba8>(width, height);
     image->set_premultiplied(true);
 
     mapnik::agg_renderer<mapnik::image_rgba8> renderer(map, *image, scale_factor);
@@ -268,16 +350,26 @@ private:
 /// resolution.
 std::unique_ptr<mapnik::image_rgba8> render_tile_view(mapnik::Map& map,
                                                       int tile_x, int tile_y, int zoom,
-                                                      int tile_size, double scale_factor) {
+                                                      int tile_width, int tile_height,
+                                                      double scale_factor) {
+    long long const device_width = static_cast<long long>(tile_width * scale_factor);
+    long long const device_height = static_cast<long long>(tile_height * scale_factor);
+    if (device_width <= 0 || device_height <= 0) {
+        throw std::runtime_error("tile dimensions must be positive");
+    }
+    if (device_width > std::numeric_limits<int>::max() / 2
+        || device_height > std::numeric_limits<int>::max() / 2) {
+        throw std::runtime_error("tile size out of range");
+    }
+
     MapStateGuard guard(map);
 
-    long long const device_size = static_cast<long long>(tile_size * scale_factor);
-    map.resize(static_cast<unsigned>(device_size), static_cast<unsigned>(device_size));
-    map.zoom_to_box(tile_bounding_box(tile_x, tile_y, zoom, tile_size));
+    map.resize(static_cast<unsigned>(device_width), static_cast<unsigned>(device_height));
+    map.zoom_to_box(tile_bounding_box(tile_x, tile_y, zoom, tile_width, tile_height));
 
     auto image = std::make_unique<mapnik::image_rgba8>(
-        static_cast<int>(device_size),
-        static_cast<int>(device_size));
+        static_cast<int>(device_width),
+        static_cast<int>(device_height));
     image->set_premultiplied(true);
 
     mapnik::agg_renderer<mapnik::image_rgba8> renderer(map, *image, scale_factor);
@@ -293,16 +385,24 @@ std::unique_ptr<mapnik::image_rgba8> render_tile_view(mapnik::Map& map,
 /// (collision detection) see the whole block instead of a single tile, so
 /// labels no longer clip at tile edges within the block.
 ///
-/// `tile_size` is the edge length of a single output tile in pixels before
-/// scale; the returned image is `meta_size * tile_size * scale_factor` pixels
-/// per edge. Tile (dx, dy) within the metatile starts at
-/// `(dx * tile_size * scale_factor, dy * tile_size * scale_factor)`.
+/// `tile_width`/`tile_height` are the edge lengths of a single output tile in
+/// pixels before scale; the returned image is
+/// `meta_size * tile_width * scale_factor` ×
+/// `meta_size * tile_height * scale_factor` pixels. Tile (dx, dy) within the
+/// metatile starts at
+/// `(dx * tile_width * scale_factor, dy * tile_height * scale_factor)`.
 std::unique_ptr<mapnik::image_rgba8> render_metatile_view(mapnik::Map& map,
                                                           int tile_x, int tile_y, int zoom,
-                                                          int tile_size, double scale_factor,
+                                                          int tile_width, int tile_height,
+                                                          double scale_factor,
                                                           int meta_size) {
-    long long const device_width = static_cast<long long>(tile_size * scale_factor) * meta_size;
-    if (device_width <= 0 || device_width > std::numeric_limits<int>::max() / 2) {
+    long long const device_width = static_cast<long long>(tile_width * scale_factor) * meta_size;
+    long long const device_height = static_cast<long long>(tile_height * scale_factor) * meta_size;
+    if (device_width <= 0 || device_height <= 0) {
+        throw std::runtime_error("metatile size out of range");
+    }
+    if (device_width > std::numeric_limits<int>::max() / 2
+        || device_height > std::numeric_limits<int>::max() / 2) {
         throw std::runtime_error("metatile size out of range");
     }
 
@@ -310,21 +410,22 @@ std::unique_ptr<mapnik::image_rgba8> render_metatile_view(mapnik::Map& map,
 
     // The map's dimensions are the device pixel size of the whole block; the
     // scale factor only boosts symbolizer sizes (see render_tile_view).
-    map.resize(static_cast<unsigned>(device_width), static_cast<unsigned>(device_width));
+    map.resize(static_cast<unsigned>(device_width), static_cast<unsigned>(device_height));
 
     // The metatile spans the boxes of its origin tile plus (meta_size - 1)
-    // tiles to the east and south.
-    double const resolution = kWebMercatorExtent / (static_cast<double>(tile_size) * (1LL << zoom));
-    double const min_x = -kWebMercatorExtent / 2.0 + tile_x * tile_size * resolution;
-    double const max_y = kWebMercatorExtent / 2.0 - tile_y * tile_size * resolution;
+    // tiles to the east and south. The XYZ grid is independent of the output
+    // pixel size, so the cell size comes from the zoom level alone.
+    double const cell = kWebMercatorExtent / static_cast<double>(1LL << zoom);
+    double const min_x = -kWebMercatorExtent / 2.0 + tile_x * cell;
+    double const max_y = kWebMercatorExtent / 2.0 - tile_y * cell;
     map.zoom_to_box(mapnik::box2d<double>(
         min_x,
-        max_y - meta_size * tile_size * resolution,
-        min_x + meta_size * tile_size * resolution,
+        max_y - static_cast<double>(meta_size) * cell,
+        min_x + static_cast<double>(meta_size) * cell,
         max_y));
 
     auto image = std::make_unique<mapnik::image_rgba8>(
-        static_cast<int>(device_width), static_cast<int>(device_width));
+        static_cast<int>(device_width), static_cast<int>(device_height));
     image->set_premultiplied(true);
 
     mapnik::agg_renderer<mapnik::image_rgba8> renderer(map, *image, scale_factor);
@@ -438,6 +539,54 @@ bool copy_to_output_buffer(std::string const& buffer,
     return true;
 }
 
+/// Write a buffer to a file atomically: the data goes to a temporary file in
+/// the same directory, which is then renamed over the destination. A crash or
+/// short write therefore never leaves a truncated image behind.
+bool write_buffer_to_file(unsigned char const* data,
+                          unsigned long size,
+                          const char* output_path,
+                          char** error_out) {
+    if (output_path == nullptr || *output_path == '\0') {
+        return report_error(error_out, "output path must not be empty");
+    }
+
+    std::string const path(output_path);
+    std::string const directory = [&path]() {
+        std::size_t const slash = path.find_last_of('/');
+        return (slash == std::string::npos) ? std::string(".") : path.substr(0, slash);
+    }();
+
+    std::string temporary = directory + "/.mapnik-write-XXXXXX";
+    std::vector<char> buffer(temporary.begin(), temporary.end());
+    buffer.push_back('\0');
+
+    int const fd = mkstemp(buffer.data());
+    if (fd < 0) {
+        return report_error(error_out, std::string("could not create a temporary file next to '") + path + "'");
+    }
+    std::string const temporary_path(buffer.data());
+
+    std::FILE* file = fdopen(fd, "wb");
+    if (file == nullptr) {
+        ::close(fd);
+        ::remove(temporary_path.c_str());
+        return report_error(error_out, std::string("could not open '") + path + "' for writing");
+    }
+
+    std::size_t const written = std::fwrite(data, 1, size, file);
+    int const closed = std::fclose(file);
+    if (written != static_cast<std::size_t>(size) || closed != 0) {
+        ::remove(temporary_path.c_str());
+        return report_error(error_out, std::string("short write to '") + path + "'");
+    }
+
+    if (std::rename(temporary_path.c_str(), path.c_str()) != 0) {
+        ::remove(temporary_path.c_str());
+        return report_error(error_out, std::string("could not replace '") + path + "'");
+    }
+    return true;
+}
+
 // --- SVG (cairo) -----------------------------------------------------------
 
 /// Render the map with the cairo backend (svg/pdf/ps) into a string.
@@ -521,11 +670,28 @@ bool mapnik_init(const char* input_plugins_path,
                  char** error_out) {
     try {
         if (input_plugins_path != nullptr && *input_plugins_path != '\0') {
-            mapnik::datasource_cache::instance().register_datasources(
-                std::string(input_plugins_path), true /* recursive */);
+            std::string const path(input_plugins_path);
+            if (!is_directory(path)) {
+                return report_error(error_out,
+                                    "plugin path is not a directory: '" + path + "'");
+            }
+            mapnik::datasource_cache::instance().register_datasources(path, true /* recursive */);
+            if (!has_plugin_files(path)) {
+                return report_error(error_out,
+                                    "no mapnik input plugins (*.input) found in '" + path + "'");
+            }
         }
         if (fonts_path != nullptr && *fonts_path != '\0') {
-            mapnik::freetype_engine::register_fonts(std::string(fonts_path), true /* recursive */);
+            std::string const path(fonts_path);
+            if (!is_directory(path)) {
+                return report_error(error_out,
+                                    "font path is not a directory: '" + path + "'");
+            }
+            // register_fonts returns false when nothing was registered.
+            if (!mapnik::freetype_engine::register_fonts(path, true /* recursive */)) {
+                return report_error(error_out,
+                                    "no usable fonts found in '" + path + "'");
+            }
         }
         return true;
     }
@@ -635,10 +801,21 @@ void mapnik_map_destroy(mapnik_map_t* map) {
 /// `explicit_defaults` the output carries every style/layer attribute even
 /// when it equals mapnik's default, which makes round-tripping into other
 /// tools more explicit.
+///
+/// - Warning: mapnik 4.2.x corrupts memory in `save_map_to_string` when
+///   `explicit_defaults` is true (segfault or `std::bad_alloc`), so that
+///   combination is rejected instead of crashing the caller.
 char* mapnik_map_save_xml(mapnik_map_t* map,
                           bool explicit_defaults,
                           char** error_out) {
     if (!require_map(map, error_out)) {
+        return nullptr;
+    }
+    if (explicit_defaults && !mapnik_explicit_defaults_supported()) {
+        report_error(error_out,
+                     "mapnik " MAPNIK_VERSION_STRING
+                     " corrupts memory when serializing with explicit defaults; "
+                     "call saveXML(explicitDefaults: false) instead");
         return nullptr;
     }
     try {
@@ -662,6 +839,8 @@ char* mapnik_map_save_xml(mapnik_map_t* map,
 }
 
 /// Serialize the current map back to an XML file (replaced if it exists).
+///
+/// - Warning: same `explicit_defaults` restriction as mapnik_map_save_xml.
 bool mapnik_map_save_xml_to_file(mapnik_map_t* map,
                                  bool explicit_defaults,
                                  const char* output_path,
@@ -671,6 +850,12 @@ bool mapnik_map_save_xml_to_file(mapnik_map_t* map,
     }
     if (output_path == nullptr || *output_path == '\0') {
         return report_error(error_out, "output path must not be empty");
+    }
+    if (explicit_defaults && !mapnik_explicit_defaults_supported()) {
+        return report_error(error_out,
+                            "mapnik " MAPNIK_VERSION_STRING
+                            " corrupts memory when serializing with explicit defaults; "
+                            "call saveXML(to:explicitDefaults: false) instead");
     }
     try {
         mapnik::save_map(*map->map, std::string(output_path), explicit_defaults);
@@ -1042,6 +1227,7 @@ bool mapnik_map_zoom_to_layer(mapnik_map_t* map,
 // ---------------------------------------------------------------------------
 
 bool mapnik_map_render_to_buffer(mapnik_map_t* map,
+                                 double scale_factor,
                                  const char* type,
                                  bool skip_empty,
                                  unsigned char** data,
@@ -1051,9 +1237,12 @@ bool mapnik_map_render_to_buffer(mapnik_map_t* map,
     if (!require_map(map, error_out)) {
         return false;
     }
+    if (!(scale_factor > 0.0) || !std::isfinite(scale_factor)) {
+        return report_error(error_out, "scale_factor must be positive and finite");
+    }
     try {
         std::string const type_string = (type != nullptr && *type != '\0') ? type : "png";
-        auto image = render_view(*map->map, 1.0);
+        auto image = render_view(*map->map, scale_factor);
         return encode_image(*image, type_string, skip_empty, data, size, is_empty, error_out);
     }
     catch (std::exception const& e) {
@@ -1062,7 +1251,9 @@ bool mapnik_map_render_to_buffer(mapnik_map_t* map,
 }
 
 bool mapnik_map_render_to_file(mapnik_map_t* map,
+                               double scale_factor,
                                const char* type,
+                               bool skip_empty,
                                const char* output_path,
                                char** error_out) {
     if (!require_map(map, error_out)) {
@@ -1071,9 +1262,15 @@ bool mapnik_map_render_to_file(mapnik_map_t* map,
     if (output_path == nullptr || *output_path == '\0') {
         return report_error(error_out, "output path must not be empty");
     }
+    if (!(scale_factor > 0.0) || !std::isfinite(scale_factor)) {
+        return report_error(error_out, "scale_factor must be positive and finite");
+    }
     try {
         std::string const type_string = (type != nullptr && *type != '\0') ? type : "png";
-        auto image = render_view(*map->map, 1.0);
+        auto image = render_view(*map->map, scale_factor);
+        if (skip_empty && is_fully_transparent(*image)) {
+            return report_error(error_out, "image is empty, nothing written");
+        }
         mapnik::save_to_file(*image, std::string(output_path), type_string);
         return true;
     }
@@ -1086,7 +1283,8 @@ bool mapnik_map_render_tile_to_buffer(mapnik_map_t* map,
                                       int tile_x,
                                       int tile_y,
                                       int zoom,
-                                      int tile_size,
+                                      int tile_width,
+                                      int tile_height,
                                       double scale_factor,
                                       const char* type,
                                       bool skip_empty,
@@ -1100,15 +1298,16 @@ bool mapnik_map_render_tile_to_buffer(mapnik_map_t* map,
     if (!validate_tile_coordinates(tile_x, tile_y, zoom, error_out)) {
         return false;
     }
-    if (tile_size <= 0) {
-        return report_error(error_out, "tile_size must be positive");
+    if (tile_width <= 0 || tile_height <= 0) {
+        return report_error(error_out, "tile dimensions must be positive");
     }
-    if (scale_factor <= 0.0) {
-        return report_error(error_out, "scale_factor must be positive");
+    if (!(scale_factor > 0.0) || !std::isfinite(scale_factor)) {
+        return report_error(error_out, "scale_factor must be positive and finite");
     }
     try {
         std::string const type_string = (type != nullptr && *type != '\0') ? type : "png";
-        auto image = render_tile_view(*map->map, tile_x, tile_y, zoom, tile_size, scale_factor);
+        auto image = render_tile_view(*map->map, tile_x, tile_y, zoom,
+                                      tile_width, tile_height, scale_factor);
         return encode_image(*image, type_string, skip_empty, data, size, is_empty, error_out);
     }
     catch (std::exception const& e) {
@@ -1120,36 +1319,31 @@ bool mapnik_map_render_tile_to_file(mapnik_map_t* map,
                                     int tile_x,
                                     int tile_y,
                                     int zoom,
-                                    int tile_size,
+                                    int tile_width,
+                                    int tile_height,
                                     double scale_factor,
                                     const char* type,
+                                    bool skip_empty,
                                     const char* output_path,
                                     char** error_out) {
+    if (output_path == nullptr || *output_path == '\0') {
+        return report_error(error_out, "output path must not be empty");
+    }
+
     unsigned char* data = nullptr;
     unsigned long size = 0;
     bool is_empty = false;
 
-    if (!mapnik_map_render_tile_to_buffer(map, tile_x, tile_y, zoom, tile_size, scale_factor,
-                                          type, true, &data, &size, &is_empty, error_out)) {
+    if (!mapnik_map_render_tile_to_buffer(map, tile_x, tile_y, zoom,
+                                          tile_width, tile_height, scale_factor,
+                                          type, skip_empty, &data, &size, &is_empty, error_out)) {
         return false;
     }
     if (data == nullptr) {
         return report_error(error_out, "tile is empty, nothing written");
     }
 
-    bool const result = [&]() -> bool {
-        std::FILE* file = std::fopen(output_path, "wb");
-        if (file == nullptr) {
-            return report_error(error_out, std::string("could not open '") + output_path + "' for writing");
-        }
-        std::size_t const written = std::fwrite(data, 1, size, file);
-        std::fclose(file);
-        if (written != size) {
-            return report_error(error_out, std::string("short write to '") + output_path + "'");
-        }
-        return true;
-    }();
-
+    bool const result = write_buffer_to_file(data, size, output_path, error_out);
     mapnik_free_buffer(data);
     return result;
 }
@@ -1158,9 +1352,11 @@ bool mapnik_map_render_metatile(mapnik_map_t* map,
                                 int tile_x,
                                 int tile_y,
                                 int zoom,
-                                int tile_size,
+                                int tile_width,
+                                int tile_height,
                                 double scale_factor,
                                 int meta_size,
+                                bool skip_empty,
                                 unsigned char** data,
                                 unsigned long* size,
                                 int* out_width,
@@ -1170,29 +1366,44 @@ bool mapnik_map_render_metatile(mapnik_map_t* map,
     if (!require_map(map, error_out)) {
         return false;
     }
-    if (!validate_tile_coordinates(tile_x, tile_y, zoom, error_out)) {
-        return false;
-    }
-    if (tile_size <= 0) {
-        return report_error(error_out, "tile_size must be positive");
-    }
-    if (scale_factor <= 0.0) {
-        return report_error(error_out, "scale_factor must be positive");
-    }
     if (meta_size <= 0) {
         return report_error(error_out, "meta_size must be positive");
+    }
+    if (!validate_metatile_coordinates(tile_x, tile_y, zoom, meta_size, error_out)) {
+        return false;
+    }
+    if (tile_width <= 0 || tile_height <= 0) {
+        return report_error(error_out, "tile dimensions must be positive");
+    }
+    if (!(scale_factor > 0.0) || !std::isfinite(scale_factor)) {
+        return report_error(error_out, "scale_factor must be positive and finite");
     }
     if (data == nullptr || size == nullptr || out_width == nullptr || out_height == nullptr) {
         return report_error(error_out, "output pointers must not be null");
     }
 
+    *data = nullptr;
+    *size = 0;
+    *out_width = 0;
+    *out_height = 0;
+    if (is_empty != nullptr) {
+        *is_empty = false;
+    }
+
     try {
-        auto image = render_metatile_view(*map->map, tile_x, tile_y, zoom, tile_size, scale_factor, meta_size);
+        auto image = render_metatile_view(*map->map, tile_x, tile_y, zoom,
+                                          tile_width, tile_height, scale_factor, meta_size);
+        bool const empty = is_fully_transparent(*image);
         if (is_empty != nullptr) {
-            *is_empty = is_fully_transparent(*image);
+            *is_empty = empty;
         }
         *out_width = static_cast<int>(image->width());
         *out_height = static_cast<int>(image->height());
+        if (empty && skip_empty) {
+            // Report the dimensions but skip the (potentially very large)
+            // buffer copy; the caller discards the block anyway.
+            return true;
+        }
         return copy_image_to_output_buffer(*image, data, size, error_out);
     }
     catch (std::exception const& e) {
@@ -1359,11 +1570,15 @@ std::string json_escape(std::string const& value) {
     return out;
 }
 
-/// Format a floating point value the way mapnik's value.to_string() does
-/// (via ostringstream, default precision).
+/// Format a floating point value for JSON with round-trip precision.
+///
+/// Uses `max_digits10` significant digits so a `double` survives the JSON
+/// round trip exactly. The previous default precision (6 significant digits)
+/// rounded coordinates at Web Mercator magnitudes to ~10 m, which silently
+/// shifted datasource extents and attribute samples.
 std::string json_number(double value) {
     std::ostringstream stream;
-    stream << value;
+    stream << std::setprecision(std::numeric_limits<double>::max_digits10) << value;
     std::string text = stream.str();
     return (text == "-0") ? "0" : text;
 }
@@ -1827,13 +2042,21 @@ char* mapnik_datasource_inspect(mapnik_datasource_t* datasource,
     }
 }
 
-int mapnik_datasource_ogr_layers(mapnik_datasource_t* datasource,
-                                 const char** layers_out,
-                                 int buffer_count,
-                                 char** error_out) {
+/// List the sub-layers of an OGR datasource.
+///
+/// Returns a NUL-separated buffer (`name\0name\0...\0`, an empty list yields
+/// an empty string) allocated with `new char[]` and released with
+/// `mapnik_free_string()`. Returns NULL with details in `*error_out` when the
+/// datasource is not an OGR source or the message cannot be parsed.
+///
+/// Returning an owned buffer (instead of pointers into process-wide static
+/// storage) means the result has no lifetime coupling to the next call and is
+/// safe to use from concurrent callers.
+char* mapnik_datasource_ogr_layers(mapnik_datasource_t* datasource,
+                                   char** error_out) {
     if (datasource == nullptr || datasource->datasource == nullptr) {
         report_error(error_out, "datasource is not initialized");
-        return -1;
+        return nullptr;
     }
 
     // Recreating the datasource surfaces the OGR "missing <layer>" exception
@@ -1847,14 +2070,14 @@ int mapnik_datasource_ogr_layers(mapnik_datasource_t* datasource,
         mapnik::datasource_cache::instance().create(retry);
         // No exception: not an OGR-multi-layer datasource.
         report_error(error_out, "datasource has no sub-layers");
-        return -1;
+        return nullptr;
     }
     catch (mapnik::datasource_exception const& e) {
         std::string const message = e.what();
         std::size_t const marker = message.find("are: ");
         if (marker == std::string::npos) {
             report_error(error_out, message);
-            return -1;
+            return nullptr;
         }
 
         std::string const list = message.substr(marker + 5);
@@ -1875,25 +2098,11 @@ int mapnik_datasource_ogr_layers(mapnik_datasource_t* datasource,
             start = comma + 1;
         }
 
-        if (layers_out != nullptr) {
-            // The strings handed out must survive until the caller has copied
-            // them: keep the names in a call-spanning static buffer whose
-            // contents stay valid until the next invocation.
-            static std::mutex storage_mutex;
-            static std::vector<std::string> storage;
-            std::lock_guard<std::mutex> storage_lock(storage_mutex);
-            storage = names;
-            int const copied = std::min(static_cast<int>(names.size()), buffer_count);
-            for (int i = 0; i < copied; ++i) {
-                layers_out[i] = storage[static_cast<std::size_t>(i)].c_str();
-            }
-            return static_cast<int>(names.size());
-        }
-        return static_cast<int>(names.size());
+        return copy_names_to_buffer(names, error_out);
     }
     catch (std::exception const& e) {
         report_error(error_out, e.what());
-        return -1;
+        return nullptr;
     }
 }
 
@@ -2047,8 +2256,16 @@ mapnik_palette_t* mapnik_palette_create(const unsigned int* colors,
 
         std::string packed;
         packed.reserve(static_cast<std::size_t>(color_count) * 4);
+        std::set<unsigned> seen;
         for (int i = 0; i < color_count; ++i) {
             unsigned const c = colors[i];
+            if (!seen.insert(c).second) {
+                std::ostringstream message;
+                message << "duplicate palette color at index " << i
+                        << ": 0x" << std::hex << std::uppercase << c;
+                report_error(error_out, message.str());
+                return nullptr;
+            }
             // rgba_palette parses bytes in RGBA order.
             packed.push_back(static_cast<char>((c >> 16) & 0xFF)); // R
             packed.push_back(static_cast<char>((c >> 8) & 0xFF));  // G
@@ -2088,6 +2305,7 @@ void mapnik_palette_destroy(mapnik_palette_t* palette) {
 
 bool mapnik_map_render_to_buffer_with_palette(mapnik_map_t* map,
                                               mapnik_palette_t* palette,
+                                              bool skip_empty,
                                               unsigned char** data,
                                               unsigned long* size,
                                               bool* is_empty,
@@ -2098,18 +2316,23 @@ bool mapnik_map_render_to_buffer_with_palette(mapnik_map_t* map,
     if (palette == nullptr || palette->palette == nullptr) {
         return report_error(error_out, "palette is not initialized");
     }
+    if (data == nullptr || size == nullptr) {
+        return report_error(error_out, "output pointers must not be null");
+    }
+
+    *data = nullptr;
+    *size = 0;
+    if (is_empty != nullptr) {
+        *is_empty = false;
+    }
+
     try {
         auto image = render_view(*map->map, 1.0);
-        if (is_fully_transparent(*image)) {
+        if (skip_empty && is_fully_transparent(*image)) {
             if (is_empty != nullptr) {
                 *is_empty = true;
             }
-            *data = nullptr;
-            *size = 0;
             return true;
-        }
-        if (is_empty != nullptr) {
-            *is_empty = false;
         }
 
         std::string buffer;
@@ -2125,32 +2348,26 @@ bool mapnik_map_render_to_buffer_with_palette(mapnik_map_t* map,
 
 bool mapnik_map_render_to_file_with_palette(mapnik_map_t* map,
                                             mapnik_palette_t* palette,
+                                            bool skip_empty,
                                             const char* output_path,
                                             char** error_out) {
+    if (output_path == nullptr || *output_path == '\0') {
+        return report_error(error_out, "output path must not be empty");
+    }
+
     unsigned char* data = nullptr;
     unsigned long size = 0;
     bool is_empty = false;
 
-    if (!mapnik_map_render_to_buffer_with_palette(map, palette, &data, &size, &is_empty, error_out)) {
+    if (!mapnik_map_render_to_buffer_with_palette(map, palette, skip_empty,
+                                                  &data, &size, &is_empty, error_out)) {
         return false;
     }
     if (data == nullptr) {
         return report_error(error_out, "image is empty, nothing written");
     }
 
-    bool const result = [&]() -> bool {
-        std::FILE* file = std::fopen(output_path, "wb");
-        if (file == nullptr) {
-            return report_error(error_out, std::string("could not open '") + output_path + "' for writing");
-        }
-        std::size_t const written = std::fwrite(data, 1, size, file);
-        std::fclose(file);
-        if (written != size) {
-            return report_error(error_out, std::string("short write to '") + output_path + "'");
-        }
-        return true;
-    }();
-
+    bool const result = write_buffer_to_file(data, size, output_path, error_out);
     mapnik_free_buffer(data);
     return result;
 }

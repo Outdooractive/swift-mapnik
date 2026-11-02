@@ -76,6 +76,37 @@ public enum ImageFormat: Sendable, Hashable {
         return true
     }
 
+    /// Validates the format's options, throwing `MapnikError.invalidInput` for
+    /// out-of-range values.
+    ///
+    /// Without this the bad value only surfaced deep inside mapnik as a
+    /// `renderingFailed` error, after the map had already been resized.
+    func validate() throws {
+        switch self {
+        case let .png(.some(colors)):
+            guard (1 ... 256).contains(colors) else {
+                throw MapnikError.invalidInput("png colors must be in 1...256, got \(colors)")
+            }
+
+        case let .jpeg(.some(quality)):
+            guard (0 ... 100).contains(quality) else {
+                throw MapnikError.invalidInput("jpeg quality must be in 0...100, got \(quality)")
+            }
+
+        case let .webp(quality, alphaQuality, _):
+            if let quality, (0 ... 100).contains(quality) == false {
+                throw MapnikError.invalidInput("webp quality must be in 0...100, got \(quality)")
+            }
+
+            if let alphaQuality, (0 ... 100).contains(alphaQuality) == false {
+                throw MapnikError.invalidInput("webp alphaQuality must be in 0...100, got \(alphaQuality)")
+            }
+
+        case .jpeg(nil), .png(nil), .png256, .svg, .tiff:
+            break
+        }
+    }
+
 }
 
 /// Parameters controlling a render operation.
@@ -106,6 +137,15 @@ public struct RenderOptions: Sendable {
     /// Output format including any format-specific options.
     public var format: ImageFormat
 
+    /// Creates render options.
+    ///
+    /// - Parameters:
+    ///   - width: Image width in pixels.
+    ///   - height: Image height in pixels.
+    ///   - bufferSize: Padding in pixels; `nil` uses the stylesheet buffer.
+    ///   - scale: Scale factor, `2.0` for @2x output.
+    ///   - skipFullyTransparent: Return `nil` for fully transparent images.
+    ///   - format: Output format.
     public init(
         width: Int = 256,
         height: Int = 256,
@@ -149,9 +189,12 @@ public struct RenderOptions: Sendable {
         if let bufferSize, bufferSize < 0 {
             throw MapnikError.invalidInput("bufferSize must not be negative, got \(bufferSize)")
         }
+
         guard format.supportsBufferEncoding else {
             throw MapnikError.invalidInput("format \(format.typeString) requires a dedicated SVG render call")
         }
+
+        try format.validate()
     }
 
 }

@@ -8,7 +8,7 @@
 
 Swift bindings for the [Mapnik](https://mapnik.org/) C++ map rendering toolkit: render map tiles (XYZ scheme) and free-form map images in Web Mercator from Mapnik XML stylesheets, on macOS and Linux.
 
-Output formats include PNG (8/24/32-bit, paletted), JPEG, WebP, TIFF and SVG (via cairo). Geographic types (`Coordinate3D`, `BoundingBox`, `MapTile`) come from the [GISTools](https://github.com/Outdooractive/gis-tools) library, which this package depends on.
+Output formats include PNG (32-bit, 8-bit paletted, and palette-quantized), JPEG, WebP, TIFF and SVG/PDF/PostScript (via cairo). Geographic types (`Coordinate3D`, `BoundingBox`, `MapTile`) come from the [GISTools](https://github.com/Outdooractive/gis-tools) library, which this package depends on.
 
 ## Table of Contents
 
@@ -246,12 +246,12 @@ let datasource = try MapnikDatasource(parameters: [
     ("type", "geojson"),
     ("file", "/path/to/data.geojson"),
 ])
-let info = try datasource.inspect(maxFeatures: 10, srs: "+init=epsg:3857")
+let info = try datasource.inspect(maxFeatures: 10, srs: "+init=epsg:4326")
 
 // Trim wide tables down to the attributes the editor shows:
 let focused = try datasource.inspect(
     maxFeatures: 10,
-    srs: "+init=epsg:3857",
+    srs: "+init=epsg:4326",
     fieldFilter: ["name", "population"])
 ```
 
@@ -293,7 +293,7 @@ let pool = try MapnikPool(factory: { try Mapnik(xml: xml) },
                           initialSize: 4,
                           maxPoolSize: 16)
 
-var generator = TileGenerator(TileSequence(bounds: germany, zoomRange: 10 ... 13))
+let generator = TileGenerator(TileSequence(bounds: germany, zoomRange: 10 ... 13))
 let queue = WorkQueue<MapTile, Data>(
     maxConcurrency: 4,
     fetchWork: { generator.next() },
@@ -317,7 +317,7 @@ let pool = try MapnikPool(factory: { try Mapnik(xml: xml) },
                           initialSize: 4,
                           maxPoolSize: 16)
 
-var generator = MetatileGenerator(MetatileSequence(bounds: germany, zoomRange: 10 ... 13, metaSize: 4))
+let generator = MetatileGenerator(MetatileSequence(bounds: germany, zoomRange: 10 ... 13, metaSize: 4))
 let queue = WorkQueue<Metatile, [(MapTile, Data)]>(
     maxConcurrency: 4,
     fetchWork: { generator.next() },
@@ -345,7 +345,8 @@ try await queue.start()
 ```swift
 let builder = TilelistBuilder()
 builder.add(tile)
-let json = ["all": builder.tilelist]
+// Tilelist already carries the top-level "all" key.
+let json = try JSONEncoder().encode(builder.tilelist)
 ```
 
 # Global initialization
@@ -377,7 +378,7 @@ if !fonts.contains("DejaVu Sans Book") {
 
 # Documentation
 
-Every public symbol carries a doc comment. Browse `Sources/Mapnik/` directly, or generate reference documentation with [DocC](https://www.swift.org/documentation/docc/) after adding the [swift-docc-plugin](https://github.com/swiftlang/swift-docc-plugin):
+Every public symbol carries a doc comment. Browse `Sources/Mapnik/` directly, or generate reference documentation with [DocC](https://www.swift.org/documentation/docc/). `swift package generate-documentation` needs the [swift-docc-plugin](https://github.com/swiftlang/swift-docc-plugin), which is not a dependency of this package (it would be pulled into every consumer's build):
 
 ```sh
 swift package generate-documentation
@@ -386,12 +387,21 @@ swift package generate-documentation
 # Package layout
 
 ```
-Sources/Mapnik/           # public API: Mapnik, RenderOptions/ImageFormat,
-│                         #   Metatile/MetatileOptions/MetatileRendered,
-│                         #   MapnikConfig, MapnikDatasource, TileSequence/
-│                         #   TileGenerator + MetatileSequence/Generator,
-│                         #   TilelistBuilder, MapnikPool, WorkQueue
-├── Extensions/           # GISTools helpers (BoundingBox parsing)
+Sources/Mapnik/
+├── Mapnik.swift          # map lifecycle, tile/metatile/free-form/vector
+│                         #   rendering, XML round trip, layers, palettes
+├── RenderOptions.swift   # ImageFormat + RenderOptions
+├── Metatile.swift        # Metatile, MetatileOptions, MetatileRendered
+├── MapnikConfig.swift    # one-time global init (plugins + fonts)
+├── MapnikDatasource.swift# datasource from parameters + inspect()
+├── MapnikError.swift     # error type bridging the C error strings
+├── MapnikPool.swift      # thread-safe pool with per-object use limits
+├── FeatureQuery.swift    # queryPoint / queryBox hit-testing
+├── TileSequence.swift    # TileSequence/TileGenerator +
+│                         #   MetatileSequence/MetatileGenerator
+├── TilelistBuilder.swift # tilelist JSON (zoom → row → [minX, maxX])
+├── WorkQueue.swift       # actor with bounded concurrency
+└── Extensions/           # BoundingBox parsing + projection helpers
 Sources/MapnikC/          # C shim between Swift and the Mapnik C++ toolkit
 │                         #   (C++ exceptions → out-params, buffer hand-off)
 Tests/MapnikTests/        # Swift Testing: rendering + unit tests
@@ -403,7 +413,10 @@ Tests/MapnikTests/        # Swift Testing: rendering + unit tests
 swift test                                # requires mapnik (see Requirements)
 ```
 
-The test fixtures use inline GeoJSON only; no network access or external data is needed.
+The test fixtures use inline GeoJSON and a synthetic 2×2 TIFF, so no network access or external data files are needed. The suite does require:
+
+- the **DejaVu** fonts (`fonts-dejavu-core` on Debian/Ubuntu, `--cask font-dejavu-sans` on macOS), because the label fixture references `DejaVu Sans Book`;
+- the **GDAL** input plugin, because the raster-datasource test opens a GeoTIFF (it ships with `libmapnik-dev` on Debian/Ubuntu and with the Homebrew formula).
 
 # Related packages
 
