@@ -148,6 +148,17 @@ struct FeatureQueryTests {
     }
 
     @Test
+    func `map point query rejects a coordinate in a planar projection`() throws {
+        let map = try Mapnik(xml: Fixtures.polygonStyle)
+
+        // Berlin in Web Mercator would be read as lon/lat and return nothing.
+        let berlin = Coordinate3D(x: 1_489_196.0, y: 6_899_390.0, projection: .epsg3857)
+        #expect(throws: MapnikError.self) {
+            try map.queryPoint(at: berlin, layerIndex: 0)
+        }
+    }
+
+    @Test
     func `map point query respects layer visibility`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
         try map.zoom(to: Fixtures.germany)

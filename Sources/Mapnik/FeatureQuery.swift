@@ -154,8 +154,9 @@ extension Mapnik {
     ///   - maxFeatures: Maximum number of features to return.
     /// - Returns: The features intersecting the coordinate (attributes plus
     ///   geometry in the map SRS).
-    /// - Throws: `MapnikError.invalidInput` for out-of-range input,
-    ///   `MapnikError.renderingFailed` when the query fails.
+    /// - Throws: `MapnikError.invalidInput` for out-of-range input or a
+    ///   coordinate in a non-geographic projection, `MapnikError.renderingFailed`
+    ///   when the query fails.
     public func queryPoint(
         at coordinate: Coordinate3D,
         layerIndex: Int,
@@ -164,8 +165,19 @@ extension Mapnik {
         guard maxFeatures > 0 else {
             throw MapnikError.invalidInput("maxFeatures must be positive, got \(maxFeatures)")
         }
-        guard layerIndex >= 0, layerIndex < layerNames.count else {
-            throw MapnikError.invalidInput("layer index \(layerIndex) out of range for \(layerNames.count) layers")
+        guard layerIndex >= 0, layerIndex < layerCount else {
+            throw MapnikError.invalidInput("layer index \(layerIndex) out of range for \(layerCount) layers")
+        }
+
+        // A coordinate in another projection would be silently read as
+        // lon/lat, returning no features.
+        switch coordinate.projection.kind {
+        case .geographic, .undefined:
+            break
+        case .geocentric, .planar:
+            throw MapnikError.invalidInput(
+                "coordinate must be in WGS 84 degrees (EPSG:4326), got \(coordinate.projection); "
+                    + "use queryPoint(x:y:layerIndex:) for map-SRS coordinates")
         }
 
         var x: Double = 0
@@ -208,8 +220,8 @@ extension Mapnik {
         guard maxFeatures > 0 else {
             throw MapnikError.invalidInput("maxFeatures must be positive, got \(maxFeatures)")
         }
-        guard layerIndex >= 0, layerIndex < layerNames.count else {
-            throw MapnikError.invalidInput("layer index \(layerIndex) out of range for \(layerNames.count) layers")
+        guard layerIndex >= 0, layerIndex < layerCount else {
+            throw MapnikError.invalidInput("layer index \(layerIndex) out of range for \(layerCount) layers")
         }
 
         // A fresh map has no usable extent; mapnik's query_point requires one.
