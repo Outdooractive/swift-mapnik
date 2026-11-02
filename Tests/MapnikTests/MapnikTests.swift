@@ -7,6 +7,7 @@ import Testing
 @Suite("Mapnik")
 struct MapnikTests {
 
+    /// Rendering intersecting tile returns image bytes.
     @Test
     func `rendering intersecting tile returns image bytes`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
@@ -18,6 +19,7 @@ struct MapnikTests {
         #expect(data?.prefix(8).elementsEqual([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) == true)
     }
 
+    /// Rendering ocean tile returns nil.
     @Test
     func `rendering ocean tile returns nil`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
@@ -25,6 +27,7 @@ struct MapnikTests {
         #expect(data == nil)
     }
 
+    /// Empty tiles kept instead of skipped.
     @Test
     func `empty tiles kept instead of skipped`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
@@ -40,6 +43,7 @@ struct MapnikTests {
         #expect(data?.isEmpty == false)
     }
 
+    /// Web P output has RIFF signature.
     @Test
     func `web P output has RIFF signature`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
@@ -50,8 +54,9 @@ struct MapnikTests {
         #expect(bytes.elementsEqual(Array("RIFF".utf8)))
     }
 
+    /// JPEG output has SOI marker.
     @Test
-    func `JPEG output has SOI marker`() throws {
+    func `jpeg output has SOI marker`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
         let data = try map.renderTile(Fixtures.europeTile, format: .jpeg(quality: 75))
 
@@ -60,8 +65,9 @@ struct MapnikTests {
         #expect(bytes.elementsEqual([0xFF, 0xD8]))
     }
 
+    /// PNG 256 output is PNG.
     @Test
-    func `PNG 256 output is PNG`() throws {
+    func `png 256 output is PNG`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
         let data = try map.renderTile(Fixtures.europeTile, format: .png256)
 
@@ -71,6 +77,7 @@ struct MapnikTests {
         #expect(bytes.elementsEqual([0x89, 0x50, 0x4E, 0x47]))
     }
 
+    /// Palette quantized PNG renders.
     @Test
     func `palette quantized PNG renders`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
@@ -81,6 +88,7 @@ struct MapnikTests {
         #expect(data?.isEmpty == false)
     }
 
+    /// Palette too many colors rejected.
     @Test
     func `palette too many colors rejected`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
@@ -91,6 +99,7 @@ struct MapnikTests {
         }
     }
 
+    /// Retina tiles are twice pixel size.
     @Test
     func `retina tiles are twice pixel size`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
@@ -100,6 +109,7 @@ struct MapnikTests {
         #expect(data?.isEmpty == false)
     }
 
+    /// Out of range tile coordinates throw.
     @Test
     func `out of range tile coordinates throw`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
@@ -109,6 +119,7 @@ struct MapnikTests {
         }
     }
 
+    /// Free form bounding box rendering produces image.
     @Test
     func `free form bounding box rendering produces image`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
@@ -118,8 +129,9 @@ struct MapnikTests {
         #expect(data?.isEmpty == false)
     }
 
+    /// SVG output contains svg element.
     @Test
-    func `SVG output contains svg element`() throws {
+    func `svg output contains svg element`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
         let data = try map.renderSVG()
 
@@ -129,8 +141,9 @@ struct MapnikTests {
         #expect(text.contains("</svg>"))
     }
 
+    /// SVG file rendering works.
     @Test
-    func `SVG file rendering works`() throws {
+    func `svg file rendering works`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
         let url = FileManager.default
             .temporaryDirectory
@@ -143,8 +156,9 @@ struct MapnikTests {
         #expect(text.contains("<svg"))
     }
 
+    /// PDF output has PDF magic.
     @Test
-    func `PDF output has PDF magic`() throws {
+    func `pdf output has PDF magic`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
         let data = try map.renderPDF()
 
@@ -153,8 +167,9 @@ struct MapnikTests {
         #expect(bytes.elementsEqual(Array("%PDF-".utf8)))
     }
 
+    /// PDF file rendering works.
     @Test
-    func `PDF file rendering works`() throws {
+    func `pdf file rendering works`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
         let url = FileManager.default
             .temporaryDirectory
@@ -167,8 +182,9 @@ struct MapnikTests {
         #expect(data.prefix(5).elementsEqual(Array("%PDF-".utf8)))
     }
 
+    /// PostScript output has PS magic.
     @Test
-    func `PostScript output has PS magic`() throws {
+    func `post script output has PS magic`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
         let data = try map.renderPostScript()
 
@@ -177,8 +193,9 @@ struct MapnikTests {
         #expect(bytes.elementsEqual(Array("%!".utf8)))
     }
 
+    /// PostScript file rendering works.
     @Test
-    func `PostScript file rendering works`() throws {
+    func `post script file rendering works`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
         let url = FileManager.default
             .temporaryDirectory
@@ -191,8 +208,9 @@ struct MapnikTests {
         #expect(data.prefix(2).elementsEqual(Array("%!".utf8)))
     }
 
+    /// PDF rendering with retina scale works.
     @Test
-    func `PDF rendering with retina scale works`() throws {
+    func `pdf rendering with retina scale works`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
         let retina = try map.renderPDF(scale: 2.0)
 
@@ -200,6 +218,7 @@ struct MapnikTests {
         #expect(retina.prefix(5).elementsEqual(Array("%PDF-".utf8)))
     }
 
+    /// Explicit buffer size does not linger after renders.
     @Test
     func `explicit buffer size does not linger after renders`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
@@ -224,6 +243,7 @@ struct MapnikTests {
         #expect(map.bufferSize == 16)
     }
 
+    /// Zoom all and layer introspection work.
     @Test
     func `zoom all and layer introspection work`() throws {
         let map = try Mapnik(xml: Fixtures.multiLayerStyle)
@@ -243,6 +263,7 @@ struct MapnikTests {
         #expect(data != nil)
     }
 
+    /// Resize and buffer size accessors work.
     @Test
     func `resize and buffer size accessors work`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
@@ -262,6 +283,7 @@ struct MapnikTests {
         #expect(map.size.height == 256)
     }
 
+    /// Invalid stylesheet throws with message.
     @Test
     func `invalid stylesheet throws with message`() {
         #expect(throws: MapnikError.self) {
@@ -269,6 +291,7 @@ struct MapnikTests {
         }
     }
 
+    /// Style error messages carry diagnostics.
     @Test
     func `style error messages carry diagnostics`() {
         do {
@@ -289,13 +312,14 @@ struct MapnikTests {
         }
     }
 
+    /// Unknown datasource type reports useful error.
     @Test
     func `unknown datasource type reports useful error`() {
         do {
             let map = try Mapnik(xml: Fixtures.unknownDatasourceStyle)
             // Some mapnik versions only fail at render time.
             _ = try map.renderTile(Fixtures.europeTile, format: .png())
-            // If it rendered, that's fine too (plugin lookup deferred).
+            Issue.record("Expected an error for an unknown datasource type")
         }
         catch let error as MapnikError {
             // Either the style load or the render failed with a message.
@@ -313,16 +337,19 @@ struct MapnikTests {
         }
     }
 
-    @Test
+    /// Label rendering exercises font registration.
+    @Test(.enabled(if: AvailableFontsTests.hasDejaVu))
     func `label rendering exercises font registration`() throws {
         let map = try Mapnik(xml: Fixtures.labelStyle)
-        // The tile may or may not be fully transparent depending on whether
-        // the DejaVu face is registered on this platform; the point of this
-        // test is that font registration happens and label rendering runs
-        // without throwing.
-        _ = try map.renderTile(Fixtures.europeTile, format: .png())
+
+        // The fixture has no polygon symbolizer, so any painted pixel comes
+        // from the text: a non-nil tile proves the face resolved and the
+        // label was placed.
+        let data = try map.renderTile(Fixtures.europeTile, format: .png())
+        #expect(data != nil, "label rendering produced no pixels; is the DejaVu face registered?")
     }
 
+    /// Rendering same map twice is stable.
     @Test
     func `rendering same map twice is stable`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
@@ -330,11 +357,13 @@ struct MapnikTests {
         let first = try map.renderTile(Fixtures.europeTile, format: .png())
         let second = try map.renderTile(Fixtures.europeTile, format: .png())
 
+        // Same length is not enough: identical bytes prove the render is
+        // deterministic and that tile rendering restores the map state.
         #expect(first != nil)
-        #expect(second != nil)
-        #expect(first?.count == second!.count)
+        #expect(first == second)
     }
 
+    /// Render options validation rejects invalid.
     @Test
     func `render options validation rejects invalid`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
@@ -350,6 +379,7 @@ struct MapnikTests {
         }
     }
 
+    /// Loading stylesheet from file renders tiles.
     @Test
     func `loading stylesheet from file renders tiles`() throws {
         let url = FileManager.default
@@ -365,6 +395,7 @@ struct MapnikTests {
         #expect(data?.isEmpty == false)
     }
 
+    /// File loading resolves datasource paths relative to stylesheet.
     @Test
     func `file loading resolves datasource paths relative to stylesheet`() throws {
         let base = FileManager.default
@@ -390,6 +421,7 @@ struct MapnikTests {
         #expect(data?.isEmpty == false)
     }
 
+    /// Missing stylesheet file throws invalid input.
     @Test
     func `missing stylesheet file throws invalid input`() {
         let url = FileManager.default
@@ -401,6 +433,7 @@ struct MapnikTests {
         }
     }
 
+    /// Invalid stylesheet file throws with message.
     @Test
     func `invalid stylesheet file throws with message`() throws {
         let url = FileManager.default
@@ -414,12 +447,14 @@ struct MapnikTests {
         }
     }
 
+    /// Map SRS comes from stylesheet.
     @Test
     func `map SRS comes from stylesheet`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
         #expect(map.srs == "epsg:3857")
     }
 
+    /// Set SRS changes projection and rejects invalid.
     @Test
     func `set SRS changes projection and rejects invalid`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
@@ -433,6 +468,7 @@ struct MapnikTests {
         #expect(map.srs == "epsg:4326")
     }
 
+    /// Rendering EPSG 4326 free form produces image.
     @Test
     func `rendering EPSG 4326 free form produces image`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
@@ -448,6 +484,7 @@ struct MapnikTests {
         #expect(data?.isEmpty == false)
     }
 
+    /// Long SRS strings round trip without truncation.
     @Test
     func `long SRS strings round trip without truncation`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
@@ -456,6 +493,7 @@ struct MapnikTests {
         #expect(map.srs == proj)
     }
 
+    /// Zoom to reprojects and throws for invalid input.
     @Test
     func `zoom to reprojects and throws for invalid input`() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)

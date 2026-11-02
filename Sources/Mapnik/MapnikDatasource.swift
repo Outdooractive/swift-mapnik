@@ -30,9 +30,16 @@ public enum DatasourceGeometryType: String, Sendable, Codable {
 /// A datasource field: name plus its reported type.
 public struct DatasourceField: Sendable, Equatable {
 
+    /// The field name as reported by the datasource.
     public var name: String
+    /// The field type reported by the datasource.
     public var type: DatasourceFieldType
 
+    /// Creates a field descriptor.
+    ///
+    /// - Parameters:
+    ///   - name: The field name.
+    ///   - type: The field type.
     public init(name: String, type: DatasourceFieldType) {
         self.name = name
         self.type = type
@@ -42,7 +49,7 @@ public struct DatasourceField: Sendable, Equatable {
 
 /// The result of inspecting a mapnik datasource.
 ///
-/// Produced by ``MapnikDatasource/inspect(maxFeatures:srs:)``; mirrors what
+/// Produced by ``MapnikDatasource/inspect(maxFeatures:srs:fieldFilter:)``; mirrors what
 /// TileMill's datasource inspection returned to the layer editor: the
 /// datasource type, geometry type, extents (native + geographic), the field
 /// list and a small sample of features.
@@ -67,7 +74,7 @@ public struct DatasourceInfo: Sendable {
     /// Feature samples with typed attribute values (null, bool, integer,
     /// double or string — as mapnik stored them). Up to the requested
     /// `maxFeatures`. Geometry samples are available through
-    /// ``queryBox(_:maxFeatures:)``.
+    /// ``MapnikDatasource/queryBox(_:maxFeatures:)``.
     public var features: [[String: JSONValue]]
 
     /// Mapnik's error message when feature iteration failed; the field list
@@ -117,7 +124,7 @@ extension DatasourceInfo: Decodable {
 /// project's layer `Datasource` object) carries.
 ///
 /// Used for datasource inspection in editor UIs: create from a layer's
-/// parameters, then call ``inspect(maxFeatures:srs:)``. Nothing here renders.
+/// parameters, then call ``inspect(maxFeatures:srs:fieldFilter:)``. Nothing here renders.
 public final class MapnikDatasource: @unchecked Sendable {
 
     let datasource: OpaquePointer
@@ -213,7 +220,7 @@ public final class MapnikDatasource: @unchecked Sendable {
     ///   - fieldFilter: Optional set of attribute names to report and
     ///     sample; `nil` reports every field. Useful to trim wide tables
     ///     down to the attributes the editor shows. Geometry samples are
-    ///     available through ``queryBox(_:maxFeatures:)``.
+    ///     available through ``MapnikDatasource/queryBox(_:maxFeatures:)``.
     /// - Returns: The parsed ``DatasourceInfo``.
     /// - Throws: `MapnikError.renderingFailed` when mapnik fails to open or
     ///   describe the datasource.

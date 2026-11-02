@@ -5,8 +5,9 @@ import MapnikC
 /// A feature returned by a feature query: identifier, geometry and
 /// attributes.
 ///
-/// Produced by ``Mapnik/queryPoint(layerIndex:at:maxFeatures:)`` and
-/// ``MapnikDatasource/queryBox(_:maxFeatures:)``.
+/// The query APIs return GISTools `Feature` values; this type is not produced
+/// by them.
+@available(*, deprecated, message: "queryPoint and queryBox return GISTools Feature values")
 public struct QueriedFeature: Sendable {
 
     /// The feature's mapnik id.

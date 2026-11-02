@@ -10,6 +10,24 @@ on:
     branches: [ "main" ]
 
 jobs:
+  format:
+    name: Format
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Install SwiftFormat
+      run: |
+        curl -fsSL -o /tmp/swiftformat.zip \
+          https://github.com/nicklockwood/SwiftFormat/releases/download/0.55.5/swiftformat_linux.zip
+        unzip -q /tmp/swiftformat.zip -d /usr/local/bin
+        chmod +x /usr/local/bin/swiftformat
+
+    - name: Lint
+      run: swiftformat Sources Tests --swift-version 6.3 --lint
+
   macos:
     name: Test (macOS)
     runs-on: macos-latest
@@ -17,7 +35,7 @@ jobs:
     # first test (Swift Testing parallel executor produces no output); cap
     # the job so a stuck run fails fast instead of burning the 6-hour
     # runner limit.
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     steps:
     - uses: actions/checkout@v5
@@ -34,14 +52,21 @@ jobs:
         brew install mapnik
         brew install --cask font-dejavu-sans
 
+    - name: Record toolchain versions
+      id: versions
+      run: |
+        echo "mapnik=$(brew list --versions mapnik | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+
     - name: Cache SwiftPM build
       uses: actions/cache@v5
       with:
+        # Keyed on the mapnik version too: .build holds objects compiled
+        # against the system library, so a mapnik bump must invalidate it.
         path: |
           .build
-        key: ${{ runner.os }}-swift-6.3.3-${{ hashFiles('Package.swift') }}
+        key: ${{ runner.os }}-swift-6.3.3-mapnik-${{ steps.versions.outputs.mapnik }}-${{ hashFiles('Package.swift') }}
         restore-keys: |
-          ${{ runner.os }}-swift-6.3.3-
+          ${{ runner.os }}-swift-6.3.3-mapnik-${{ steps.versions.outputs.mapnik }}-
 
     - name: Build
       run: CC=clang CXX=clang++ swift build
@@ -51,10 +76,13 @@ jobs:
       # before the first test on the macOS runner with Swift 6.3.3.
       run: CC=clang CXX=clang++ swift test --no-parallel
 
+    - name: Build (release)
+      run: CC=clang CXX=clang++ swift build -c release
+
   linux:
     name: Test (Linux)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     # Run in the official Swift image instead of installing a toolchain with
     # swift-actions/setup-swift: on Linux that action downloads Swiftly and
     # verifies its GPG signature without importing swift.org's keys first, so
@@ -74,17 +102,73 @@ jobs:
         apt-get update
         apt-get install -y libmapnik-dev mapnik-utils fonts-dejavu-core
 
+    - name: Record toolchain versions
+      id: versions
+      run: |
+        echo "mapnik=$(pkg-config --modversion libmapnik 2>/dev/null || echo unknown)" >> "$GITHUB_OUTPUT"
+
     - name: Cache SwiftPM build
       uses: actions/cache@v5
       with:
+        # Keyed on the mapnik version too: .build holds objects compiled
+        # against the system library, so a mapnik bump must invalidate it.
         path: |
           .build
-        key: ${{ runner.os }}-swift-6.3.3-${{ hashFiles('Package.swift') }}
+        key: ${{ runner.os }}-swift-6.3.3-mapnik-${{ steps.versions.outputs.mapnik }}-${{ hashFiles('Package.swift') }}
         restore-keys: |
-          ${{ runner.os }}-swift-6.3.3-
+          ${{ runner.os }}-swift-6.3.3-mapnik-${{ steps.versions.outputs.mapnik }}-
 
     - name: Build
       run: CC=clang CXX=clang++ swift build
 
     - name: Test
       run: CC=clang CXX=clang++ swift test --no-parallel
+
+    - name: Build (release)
+      run: CC=clang CXX=clang++ swift build -c release
+
+  sanitizer:
+    name: Thread sanitizer
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container: swift:6.3.3
+
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Install mapnik
+      run: |
+        apt-get update
+        apt-get install -y libmapnik-dev mapnik-utils fonts-dejavu-core
+
+    # MapnikPool, WorkQueue, MapnikDatasource and TilelistBuilder are
+    # @unchecked Sendable with hand-rolled locking, so a TSan run is the only
+    # thing that can catch a regression there.
+    - name: Test
+      run: CC=clang CXX=clang++ swift test --sanitize=thread --no-parallel
+
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container: swift:6.3.3
+
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Install mapnik
+      run: |
+        apt-get update
+        apt-get install -y libmapnik-dev mapnik-utils fonts-dejavu-core
+
+    # swift-docc-plugin is not a package dependency (it would be pulled into
+    # every consumer's build), so add it for this job only.
+    - name: Add swift-docc-plugin
+      run: |
+        swift package --disable-sandbox \
+          add-dependency https://github.com/swiftlang/swift-docc-plugin --from 1.4.0
+
+    - name: Build documentation
+      run: |
+        CC=clang CXX=clang++ swift package generate-documentation \
+          --target Mapnik --warnings-as-errors

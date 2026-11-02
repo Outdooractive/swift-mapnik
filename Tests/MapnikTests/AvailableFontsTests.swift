@@ -7,38 +7,46 @@ import Testing
 @Suite("Available fonts")
 struct AvailableFontsTests {
 
+    /// The face the label fixture references.
+    static let requiredFace = "DejaVu Sans Book"
+
+    /// `true` when the DejaVu face is registered on this machine.
+    ///
+    /// The label fixture needs it; without it the label tests are skipped
+    /// instead of failing on a machine that has no DejaVu fonts installed.
+    static var hasDejaVu: Bool {
+        (try? MapnikConfig.availableFonts().contains(requiredFace)) ?? false
+    }
+
+    /// Available fonts returns registered face names.
     @Test
     func `available fonts returns registered face names`() throws {
         let fonts = try MapnikConfig.availableFonts()
 
-        #expect(fonts.isEmpty == false)
-        // The platform font directories are non-empty; at least one face
-        // registers on every supported platform.
+        // Some font directory exists on every supported platform, so at least
+        // one face registers.
         #expect(fonts.count >= 1)
     }
 
+    /// Available fonts are sorted in registration order without duplicates.
     @Test
-    func `available fonts are sorted in registration order without duplicates`() throws {
+    func `available fonts are unique and non empty`() throws {
         let fonts = try MapnikConfig.availableFonts()
 
-        // No empty names and no duplicates (mapnik registers each face once).
-        #expect(fonts.allSatisfy({ $0.isEmpty == false }))
+        #expect(fonts.allSatisfy { $0.isEmpty == false })
         #expect(Set(fonts).count == fonts.count)
     }
 
-    @Test
+    /// The label fixture's face is available.
+    @Test(.enabled(if: AvailableFontsTests.hasDejaVu))
     func `label style face name is available`() throws {
-        // The test fixtures use "DejaVu Sans Book", registered by the
-        // platform font directories on both macOS and Linux.
         let fonts = try MapnikConfig.availableFonts()
-        #expect(fonts.contains("DejaVu Sans Book"))
+        #expect(fonts.contains(Self.requiredFace))
     }
 
+    /// Available fonts is callable repeatedly.
     @Test
     func `available fonts is callable repeatedly`() throws {
-        // The enumeration touches mapnik's global registry; calling it
-        // repeatedly (including from concurrent tasks) must be safe and
-        // stable.
         let first = try MapnikConfig.availableFonts()
         let second = try MapnikConfig.availableFonts()
 

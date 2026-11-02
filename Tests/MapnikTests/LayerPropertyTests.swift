@@ -7,6 +7,7 @@ import Testing
 @Suite("Layer properties")
 struct LayerPropertyTests {
 
+    /// Layer envelope matches the datasource extent.
     @Test
     func `layer envelope matches the datasource extent`() throws {
         let map = try Mapnik(xml: Fixtures.multiLayerStyle)
@@ -22,6 +23,7 @@ struct LayerPropertyTests {
         #expect(second == envelope)
     }
 
+    /// Layer envelope throws for out of range and empty layers.
     @Test
     func `layer envelope throws for out of range and empty layers`() throws {
         let map = try Mapnik(xml: Fixtures.multiLayerStyle)
@@ -34,6 +36,7 @@ struct LayerPropertyTests {
         }
     }
 
+    /// Layer SRS comes from the stylesheet.
     @Test
     func `layer SRS comes from the stylesheet`() throws {
         let map = try Mapnik(xml: Fixtures.multiLayerStyle)
@@ -44,6 +47,7 @@ struct LayerPropertyTests {
         #expect(map.layerSRS(-1) == nil)
     }
 
+    /// Layer queryable status defaults to false.
     @Test
     func `layer queryable status defaults to false`() throws {
         let map = try Mapnik(xml: Fixtures.multiLayerStyle)
@@ -54,6 +58,7 @@ struct LayerPropertyTests {
         #expect(map.layerQueryable(-1) == nil)
     }
 
+    /// Layer visibility at scale respects zoom rules.
     @Test
     func `layer visibility at scale respects zoom rules`() throws {
         // A style with a layer restricted to scale denominators 1000..100000.
@@ -85,6 +90,7 @@ struct LayerPropertyTests {
         #expect(map.layerVisible(0, atScaleDenominator: 10000) == false)
     }
 
+    /// Zoom to layer fits the layer envelope.
     @Test
     func `zoom to layer fits the layer envelope`() throws {
         let map = try Mapnik(xml: Fixtures.multiLayerStyle)

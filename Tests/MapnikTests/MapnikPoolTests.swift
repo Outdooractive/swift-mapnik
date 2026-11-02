@@ -25,6 +25,7 @@ private func withRetry<T: Sendable>(
 @Suite("MapnikPool")
 struct MapnikPoolTests {
 
+    /// Initial pool filled with initial size objects.
     @Test
     func `initial pool filled with initial size objects`() throws {
         let pool = try MapnikPool(
@@ -39,6 +40,7 @@ struct MapnikPoolTests {
         #expect(stats.live == 3)
     }
 
+    /// Acquire and release rounds trips objects.
     @Test
     func `acquire and release rounds trips objects`() throws {
         let pool = try MapnikPool(
@@ -62,6 +64,7 @@ struct MapnikPoolTests {
         #expect(pool.stats().inUse == 0)
     }
 
+    /// Pool refuses to grow beyond max pool size.
     @Test
     func `pool refuses to grow beyond max pool size`() throws {
         let pool = try MapnikPool(
@@ -78,6 +81,7 @@ struct MapnikPoolTests {
         }
     }
 
+    /// Released objects reusable.
     @Test
     func `released objects reusable`() throws {
         let pool = try MapnikPool(
@@ -92,6 +96,7 @@ struct MapnikPoolTests {
         #expect(ObjectIdentifier(first) == ObjectIdentifier(second))
     }
 
+    /// Objects retired after max uses per object uses.
     @Test
     func `objects retired after max uses per object uses`() throws {
         let pool = try MapnikPool(
@@ -110,6 +115,7 @@ struct MapnikPoolTests {
         #expect(ObjectIdentifier(third) != ObjectIdentifier(first))
     }
 
+    /// Concurrent acquire release never exceeds pool size.
     @Test
     func `concurrent acquire release never exceeds pool size`() async throws {
         let pool = try MapnikPool(
@@ -139,6 +145,7 @@ struct MapnikPoolTests {
         #expect(stats.live <= 4)
     }
 
+    /// Factory failures propagate from init.
     @Test
     func `factory failures propagate from init`() {
         struct Boom: Error {}

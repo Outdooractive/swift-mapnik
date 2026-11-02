@@ -11,6 +11,7 @@ struct TileMathTests {
     // clamp at the poles) together with swift-mapnik's TileSequence, which
     // builds tile ranges on top of it.
 
+    /// Well known tile coordinates.
     @Test
     func `well known tile coordinates`() {
         // Berlin, Brandenburger Tor (52.5163 N, 13.3777 E) at zoom 10 is
@@ -22,6 +23,7 @@ struct TileMathTests {
         #expect(tile.z == 10)
     }
 
+    /// Zoom zero covers world in one tile.
     @Test
     func `zoom zero covers world in one tile`() {
         let anywhere = Coordinate3D(latitude: 12.3, longitude: -45.6)
@@ -30,6 +32,7 @@ struct TileMathTests {
         #expect(tile.y == 0)
     }
 
+    /// Western longitudes produce correct tiles.
     @Test
     func `western longitudes produce correct tiles`() {
         // New York (40.7128 N, -74.0060 E) at zoom 6 is tile (18, 24).
@@ -39,6 +42,7 @@ struct TileMathTests {
         #expect(tile.y == 24)
     }
 
+    /// Longitudes just west of prime meridian round down.
     @Test
     func `longitudes just west of prime meridian round down`() {
         // -0.04 degrees at zoom 12 is inside tile 2047; truncation towards
@@ -51,6 +55,7 @@ struct TileMathTests {
         #expect(east.x == 2048)
     }
 
+    /// Longitudes beyond dateline wrap into range.
     @Test
     func `longitudes beyond dateline wrap into range`() {
         // 185 degrees is east of the dateline and wraps to -175 degrees,
@@ -60,6 +65,7 @@ struct TileMathTests {
         #expect(tile.x == 0)
     }
 
+    /// Poles clamped to mercator limit.
     @Test
     func `poles clamped to mercator limit`() {
         let northPole = MapTile(coordinate: Coordinate3D(latitude: 90.0, longitude: 0.0), atZoom: 4)
@@ -69,6 +75,7 @@ struct TileMathTests {
         #expect(southPole.y == 15)
     }
 
+    /// Coordinates in other projections reprojected.
     @Test
     func `coordinates in other projections reprojected`() {
         // Berlin in Web Mercator.
@@ -78,6 +85,7 @@ struct TileMathTests {
         #expect(tile.y == 335)
     }
 
+    /// Bounding box string parsing accepts valid input.
     @Test
     func `bounding box string parsing accepts valid input`() {
         let box = BoundingBox(parsing: "5.9, 47.2, 15.0, 55.0")
@@ -89,6 +97,7 @@ struct TileMathTests {
         #expect(box?.projection == .epsg4326)
     }
 
+    /// Bounding box string parsing rejects invalid input.
     @Test
     func `bounding box string parsing rejects invalid input`() {
         #expect(BoundingBox(parsing: "") == nil)
@@ -108,6 +117,7 @@ struct TileSequenceTests {
         southWest: Coordinate3D(latitude: 47.2, longitude: 10.2),
         northEast: Coordinate3D(latitude: 47.6, longitude: 10.6))
 
+    /// Single zoom produces exactly B box tiles.
     @Test
     func `single zoom produces exactly B box tiles`() {
         // A small bbox at low zoom: 10.2..10.6 E, 47.2..47.6 N spans 2 tiles
@@ -126,6 +136,7 @@ struct TileSequenceTests {
         #expect(tiles[2].x < tiles[3].x)
     }
 
+    /// Multiple zoom levels descend by default.
     @Test
     func `multiple zoom levels descend by default`() {
         let sequence = TileSequence(bounds: bounds, zoomRange: 12 ... 13)
@@ -138,6 +149,7 @@ struct TileSequenceTests {
         #expect(tiles.last?.z == 12)
     }
 
+    /// Ascending order visits zoom levels reverse.
     @Test
     func `ascending order visits zoom levels reverse`() {
         let sequence = TileSequence(bounds: bounds, zoomRange: 12 ... 13, zoomOrder: .ascending)
@@ -147,6 +159,7 @@ struct TileSequenceTests {
         #expect(tiles.last?.z == 13)
     }
 
+    /// Count matches iterated tile count across zooms.
     @Test
     func `count matches iterated tile count across zooms`() {
         for zoomRange in [10 ... 10, 10 ... 12, 0 ... 4, 14 ... 16] {
@@ -155,12 +168,14 @@ struct TileSequenceTests {
         }
     }
 
+    /// Worldwide zoom iterates tiles.
     @Test
     func `worldwide zoom iterates tiles`() {
         let sequence = TileSequence(bounds: .world, zoomRange: 0 ... 2)
         #expect(sequence.count == 21)
     }
 
+    /// Tile generator hands out same tiles exactly once.
     @Test
     func `tile generator hands out same tiles exactly once`() {
         let sequence = TileSequence(bounds: bounds, zoomRange: 13 ... 14)
@@ -173,6 +188,7 @@ struct TileSequenceTests {
         #expect(fromGenerator.count == sequence.count)
     }
 
+    /// Iterator returns nil after exhaustion.
     @Test
     func `iterator returns nil after exhaustion`() {
         var iterator = TileSequence(bounds: bounds, zoomRange: 9 ... 9).makeIterator()
@@ -183,6 +199,7 @@ struct TileSequenceTests {
         #expect(iterator.next() == nil)
     }
 
+    /// Tiles at any zoom within valid bounds.
     @Test
     func `tiles at any zoom within valid bounds`() {
         let sequence = TileSequence(bounds: bounds, zoomRange: 0 ... 8)

@@ -64,8 +64,10 @@ public struct Metatile: Sendable, Hashable {
 ///
 /// ```swift
 /// let options = MetatileOptions(metaSize: 4, render: .tile(format: .png()))
-/// let metatile = try map.renderMetatile(x: 1080, y: 714, z: 11, options: options)
-/// let tile = try metatile?.tile(x: 1082, y: 715) // crop out one tile
+/// let metatile = try map.renderMetatile(
+///     Metatile(origin: MapTile(x: 1080, y: 712, z: 11), metaSize: 4),
+///     options: options)
+/// let tile = try metatile?.tile(at: MapTile(x: 1082, y: 715, z: 11)) // crop one tile
 /// ```
 public struct MetatileOptions: Sendable {
 
@@ -146,10 +148,12 @@ public struct MetatileRendered: Sendable {
         guard x >= 0, x < width, y >= 0, y < height else {
             return nil
         }
+
         let offset = (y * width + x) * 4
         guard offset + 3 < rgba.count else {
             return nil
         }
+
         return [rgba[offset], rgba[offset + 1], rgba[offset + 2], rgba[offset + 3]]
     }
 
