@@ -10,7 +10,7 @@ import Foundation
 /// `MapnikPool` (processing) for bulk tile rendering:
 ///
 /// ```swift
-/// var generator = TileGenerator(TileSequence(bounds: bounds, zoomRange: 10...12))
+/// let generator = TileGenerator(TileSequence(bounds: bounds, zoomRange: 10 ... 12))
 /// let queue = WorkQueue(
 ///     maxConcurrency: 8,
 ///     fetchWork: { generator.next() },
@@ -29,14 +29,19 @@ import Foundation
 /// work items. When the surrounding task is cancelled, `start` stops fetching
 /// new work and throws `CancellationError` once in-flight items drained.
 ///
+/// Errors: the first error thrown by `fetchWork`, `processWork` or
+/// `onResult` cancels the remaining work, drains the in-flight tasks and is
+/// rethrown. The queue is reusable afterwards — a subsequent `start()` runs
+/// from a clean state.
+///
 /// - Note: `fetchWork` and `onResult` run on the actor; keep them cheap or
 ///   async. `processWork` runs detached on the cooperative thread pool and
 ///   must be `Sendable`-safe.
 public actor WorkQueue<Work: Sendable, Result: Sendable> {
 
-    private let fetchWork: () async throws -> Work?
+    private let fetchWork: @Sendable () async throws -> Work?
     private let processWork: @Sendable (Work) async throws -> Result?
-    private let onResult: (Work, Result?) async throws -> Void
+    private let onResult: @Sendable (Work, Result?) async throws -> Void
 
     private var _maxConcurrency: Int
     private var inFlight = 0
@@ -63,9 +68,9 @@ public actor WorkQueue<Work: Sendable, Result: Sendable> {
     ///     Called on the actor, in completion order.
     public init(
         maxConcurrency: Int,
-        fetchWork: @escaping () async throws -> Work?,
+        fetchWork: @escaping @Sendable () async throws -> Work?,
         processWork: @escaping @Sendable (Work) async throws -> Result?,
-        onResult: @escaping (Work, Result?) async throws -> Void,
+        onResult: @escaping @Sendable (Work, Result?) async throws -> Void,
     ) {
         self._maxConcurrency = max(1, min(256, maxConcurrency))
         self.fetchWork = fetchWork
@@ -79,40 +84,53 @@ public actor WorkQueue<Work: Sendable, Result: Sendable> {
     ///   `onResult`, or `CancellationError` if the surrounding task was
     ///   cancelled.
     public func start() async throws {
-        try await withThrowingTaskGroup(of: (Work, Result?).self) { group in
-            // Initial fill.
-            while inFlight < maxConcurrency {
-                try checkCancellation()
-                guard let work = try await fetchWork() else {
-                    break
-                }
+        inFlight = 0
 
-                inFlight += 1
-                group.addTask {
-                    try await (work, self.processWork(work))
-                }
-            }
-
-            // Drain: process results and refill until everything is done.
-            while let (work, result) = try await group.next() {
-                inFlight -= 1
-
-                try checkCancellation()
-                try await onResult(work, result)
-
+        do {
+            try await withThrowingTaskGroup(of: (Work, Result?).self) { group in
+                // Initial fill.
                 while inFlight < maxConcurrency {
                     try checkCancellation()
-                    guard let next = try await fetchWork() else {
+                    guard let work = try await fetchWork() else {
                         break
                     }
 
                     inFlight += 1
                     group.addTask {
-                        try await (next, self.processWork(next))
+                        try await (work, self.processWork(work))
+                    }
+                }
+
+                // Drain: process results and refill until everything is done.
+                while let (work, result) = try await group.next() {
+                    inFlight -= 1
+
+                    try checkCancellation()
+                    try await onResult(work, result)
+
+                    while inFlight < maxConcurrency {
+                        try checkCancellation()
+                        guard let next = try await fetchWork() else {
+                            break
+                        }
+
+                        inFlight += 1
+                        group.addTask {
+                            try await (next, self.processWork(next))
+                        }
                     }
                 }
             }
         }
+        catch {
+            // The task group cancels its children on scope exit, but
+            // cancellation is cooperative: wait for the in-flight tasks so
+            // `start` does not return while work is still running.
+            inFlight = 0
+            throw error
+        }
+
+        inFlight = 0
     }
 
     /// Cooperative cancellation: aborts once the surrounding task is

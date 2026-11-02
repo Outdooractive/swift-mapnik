@@ -8,8 +8,9 @@ import Testing
 @Suite("MapnikDatasource")
 struct MapnikDatasourceTests {
 
+    /// Geojson datasource reports fields geometry and extent.
     @Test
-    func `geojson datasource reports fields geometry and extent`() throws {
+    func geojsonDatasourceReportsFieldsGeometryAndExtent() throws {
         let datasource = try MapnikDatasource(parameters: [
             ("type", "geojson"),
             ("inline", Fixtures.geojsonMultiAttribute),
@@ -42,8 +43,9 @@ struct MapnikDatasourceTests {
         #expect(info.featureError == nil)
     }
 
+    /// Raster datasources report no features or geometry.
     @Test
-    func `raster datasources report no features or geometry`() throws {
+    func rasterDatasourcesReportNoFeaturesOrGeometry() throws {
         // A 2x2 GeoTIFF built from raw bytes (little-endian, uint8 bands).
         // The gdal plugin reads it; type detection alone is what matters.
         let tiff = Fixtures.tinyTiff
@@ -65,8 +67,9 @@ struct MapnikDatasourceTests {
         #expect(info.features.isEmpty)
     }
 
+    /// Feature iteration errors do not discard fields.
     @Test
-    func `feature iteration errors do not discard fields`() throws {
+    func featureIterationErrorsDoNotDiscardFields() throws {
         // A GeoJSON datasource whose file disappears after creation —
         // mapnik parses lazily, so creation succeeds but the featureset
         // iteration throws.
@@ -86,8 +89,9 @@ struct MapnikDatasourceTests {
         #expect(info.fields.isEmpty == false || info.featureError != nil)
     }
 
+    /// Missing plugin throws with mapnik message.
     @Test
-    func `missing plugin throws with mapnik message`() throws {
+    func missingPluginThrowsWithMapnikMessage() throws {
         do {
             let datasource = try MapnikDatasource(parameters: [
                 ("type", "does-not-exist"),
@@ -101,8 +105,9 @@ struct MapnikDatasourceTests {
         }
     }
 
+    /// Empty parameters rejected.
     @Test
-    func `empty parameters rejected`() {
+    func emptyParametersRejected() throws {
         #expect(throws: (any Error).self) {
             _ = try MapnikDatasource(parameters: [])
         }
@@ -110,8 +115,9 @@ struct MapnikDatasourceTests {
 
     // MARK: - Inspection improvements
 
+    /// Field filter narrows the field list and samples.
     @Test
-    func `field filter narrows the field list and samples`() throws {
+    func fieldFilterNarrowsTheFieldListAndSamples() throws {
         let datasource = try MapnikDatasource(parameters: [
             ("type", "geojson"),
             ("inline", Fixtures.geojsonMultiAttribute),
@@ -145,8 +151,9 @@ struct MapnikDatasourceTests {
         #expect(none.features.first?.isEmpty == true)
     }
 
+    /// Typed attribute values survive inspection.
     @Test
-    func `typed attribute values survive inspection`() throws {
+    func typedAttributeValuesSurviveInspection() throws {
         let datasource = try MapnikDatasource(parameters: [
             ("type", "geojson"),
             ("inline", Fixtures.geojsonMultiAttribute),
@@ -157,6 +164,58 @@ struct MapnikDatasourceTests {
 
         #expect(feature["name"]?.stringValue == "Europe")
         #expect(feature["population"]?.intValue == 742_000_000)
+    }
+
+    /// Precise coordinates survive inspection.
+    @Test
+    func preciseCoordinatesSurviveInspection() throws {
+        // The inspection JSON used to format doubles with 6 significant
+        // digits, which rounded coordinates at Web Mercator magnitudes to
+        // ~10 m.
+        let datasource = try MapnikDatasource(parameters: [
+            ("type", "geojson"),
+            ("inline", """
+            {"type":"FeatureCollection","features":[{"type":"Feature",
+            "properties":{"value":1.23456789012345},
+            "geometry":{"type":"Point","coordinates":[12.3456789012345,45.6789012345678]}}]}
+            """),
+        ])
+
+        let info = try datasource.inspect(
+            maxFeatures: 1,
+            srs: "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs")
+
+        #expect(abs(info.extent[0] - 12.3456789012345) < 1e-9)
+        #expect(abs(info.extent[1] - 45.6789012345678) < 1e-9)
+
+        let value = try #require(info.features.first?["value"]?.doubleValue)
+        #expect(abs(value - 1.23456789012345) < 1e-12)
+    }
+
+    /// Unrecognised field types decode as unknown.
+    @Test
+    func unrecognisedFieldTypesDecodeAsUnknown() throws {
+        // A future mapnik attribute type must not make the field disappear.
+        let json = """
+        {"type":"vector","geometry_type":"polygon",
+         "extent":[0,0,1,1],"unproj_extent":[0,0,1,1],
+         "fields":[["name","String"],["future","SomeNewType"]],
+         "features":[]}
+        """
+        let info = try JSONDecoder().decode(DatasourceInfo.self, from: Data(json.utf8))
+
+        #expect(info.fields.map(\.name) == ["name", "future"])
+        #expect(info.fields.last?.type == .unknown)
+    }
+
+    /// Duplicate palette colours are rejected.
+    @Test
+    func duplicatePaletteColorsAreRejected() throws {
+        let map = try Mapnik(xml: Fixtures.polygonStyle)
+
+        #expect(throws: MapnikError.self) {
+            _ = try map.renderPNG256(colors: [0xFFFF_0000, 0xFFFF_0000], width: 32, height: 32)
+        }
     }
 
 }

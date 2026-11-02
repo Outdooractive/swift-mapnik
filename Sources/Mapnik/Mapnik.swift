@@ -182,7 +182,8 @@ public final class Mapnik: @unchecked Sendable {
     ///   - x: Tile column at zoom `z`, 0 ..< 2^z.
     ///   - y: Tile row at zoom `z`, 0 ..< 2^z, counting from the north.
     ///   - z: Zoom level, 0...30.
-    ///   - format: Output format. Defaults to lossless-ish WebP.
+    ///   - format: Output format. Defaults to mapnik's default WebP encoding
+    ///     (lossy, quality 80); pass `.webp(quality:lossless:)` for control.
     ///   - size: Tile size in pixels. Defaults to 256; `512` is common for
     ///     MapLibre/Mapbox GL style tiles.
     ///   - scale: Scale factor, `2.0` for @2x tiles.
@@ -214,6 +215,8 @@ public final class Mapnik: @unchecked Sendable {
         options: RenderOptions,
     ) throws -> Data? {
         try options.validate()
+        try validateTile(tile)
+
         let previousBuffer = applyBuffer(options.bufferSize)
         defer {
             if let previousBuffer {
@@ -232,6 +235,7 @@ public final class Mapnik: @unchecked Sendable {
                 Int32(clamping: tile.y),
                 Int32(clamping: tile.z),
                 Int32(clamping: options.width),
+                Int32(clamping: options.height),
                 options.scale,
                 options.format.typeString,
                 options.skipFullyTransparent,
@@ -268,14 +272,17 @@ public final class Mapnik: @unchecked Sendable {
     ///
     /// - Parameters:
     ///   - tile: The tile to render.
-    ///   - url: Destination file URL. Replaced if it exists.
+    ///   - url: Destination file URL. Replaced atomically if it exists.
     ///   - format: Output format.
     ///   - size: Tile size in pixels.
     ///   - scale: Scale factor, `2.0` for @2x tiles.
     ///   - bufferSize: Padding in pixels; `nil` uses the stylesheet buffer.
-    /// - Throws: `MapnikError.renderingFailed` if rendering or writing
-    ///   failed. Writing an empty tile is reported as a failure; check with
-    ///   the `Data`-returning variant if empty tiles are expected.
+    ///   - skipFullyTransparent: When true (the default), a fully transparent
+    ///     tile is not written and the call throws.
+    /// - Throws: `MapnikError.invalidInput` for out-of-range tiles,
+    ///   `MapnikError.renderingFailed` if rendering or writing failed. Writing
+    ///   an empty tile is reported as a failure unless
+    ///   `skipFullyTransparent` is false.
     public func renderTileToFile(
         _ tile: MapTile,
         to url: URL,
@@ -283,14 +290,36 @@ public final class Mapnik: @unchecked Sendable {
         size: Int = 256,
         scale: Double = 1.0,
         bufferSize: Int? = nil,
+        skipFullyTransparent: Bool = true,
     ) throws {
-        let options = RenderOptions(
-            width: size,
-            height: size,
-            bufferSize: bufferSize,
-            scale: scale,
-            format: format)
+        try renderTileToFile(
+            tile,
+            to: url,
+            options: RenderOptions(
+                width: size,
+                height: size,
+                bufferSize: bufferSize,
+                scale: scale,
+                skipFullyTransparent: skipFullyTransparent,
+                format: format))
+    }
+
+    /// Renders an XYZ tile to a file with full option control.
+    ///
+    /// - Parameters:
+    ///   - tile: The tile to render.
+    ///   - url: Destination file URL. Replaced atomically if it exists.
+    ///   - options: Tile size, scale, buffer, format and skip behaviour.
+    /// - Throws: `MapnikError.invalidInput` for out-of-range tiles,
+    ///   `MapnikError.renderingFailed` if rendering or writing failed.
+    public func renderTileToFile(
+        _ tile: MapTile,
+        to url: URL,
+        options: RenderOptions,
+    ) throws {
         try options.validate()
+        try validateTile(tile)
+
         let previousBuffer = applyBuffer(options.bufferSize)
         defer {
             if let previousBuffer {
@@ -305,8 +334,10 @@ public final class Mapnik: @unchecked Sendable {
                 Int32(clamping: tile.y),
                 Int32(clamping: tile.z),
                 Int32(clamping: options.width),
+                Int32(clamping: options.height),
                 options.scale,
                 options.format.typeString,
+                options.skipFullyTransparent,
                 url.path(percentEncoded: false),
                 errorOut)
         }
@@ -326,9 +357,10 @@ public final class Mapnik: @unchecked Sendable {
     /// Like `renderTile`, the block is always rendered in Web Mercator XYZ
     /// geometry regardless of the map's `srs`. The render options' buffer
     /// (padding) applies around the whole block, not per tile — with the
-    /// default `bufferSize` of 16 on a 4 × 4 metatile of 256-pixel tiles this
-    /// gives proportionally less per-tile padding than a plain tile render;
-    /// raise `bufferSize` if edge padding matters for your style.
+    /// stylesheet's buffer (16 in the test fixture) on a 4 × 4 metatile of
+    /// 256-pixel tiles this gives proportionally less per-tile padding than a
+    /// plain tile render; raise `bufferSize` if edge padding matters for your
+    /// style.
     ///
     /// - Parameters:
     ///   - origin: The block's top-left (north-west) tile.
@@ -371,6 +403,13 @@ public final class Mapnik: @unchecked Sendable {
         options: MetatileOptions,
     ) throws -> MetatileRendered? {
         try options.validate()
+        guard options.metaSize == metatile.metaSize else {
+            throw MapnikError.invalidInput(
+                "options.metaSize (\(options.metaSize)) does not match the metatile's metaSize (\(metatile.metaSize))")
+        }
+
+        try validateMetatile(metatile)
+
         let previousBuffer = applyBuffer(options.render.bufferSize)
         defer {
             if let previousBuffer {
@@ -391,8 +430,10 @@ public final class Mapnik: @unchecked Sendable {
                 Int32(clamping: metatile.origin.y),
                 Int32(clamping: metatile.origin.z),
                 Int32(clamping: options.render.width),
+                Int32(clamping: options.render.height),
                 options.render.scale,
                 Int32(clamping: options.metaSize),
+                options.render.skipFullyTransparent,
                 &data,
                 &size,
                 &width,
@@ -401,14 +442,20 @@ public final class Mapnik: @unchecked Sendable {
                 errorOut)
         }
 
-        let byteCount = Int(size)
-        guard let data, byteCount > 0, width > 0, height > 0 else {
+        guard width > 0, height > 0 else {
             throw MapnikError.renderingFailed("metatile render produced no output")
         }
 
         if isEmpty, options.render.skipFullyTransparent {
-            defer { mapnik_free_buffer(data) }
+            if let data {
+                mapnik_free_buffer(data)
+            }
             return nil
+        }
+
+        let byteCount = Int(size)
+        guard let data, byteCount > 0 else {
+            throw MapnikError.renderingFailed("metatile render produced no output")
         }
 
         let buffer = Data(
@@ -452,37 +499,33 @@ public final class Mapnik: @unchecked Sendable {
     }
 
     /// Renders the current map view with the given options.
+    ///
+    /// The map is resized to `options.width` × `options.height` for the
+    /// render and restored afterwards, so repeated renders stay independent.
     public func render(_ options: RenderOptions) throws -> Data? {
-        try options.validate()
+        try withRenderState(options, resize: true) {
+            var data: UnsafeMutablePointer<UInt8>? = nil
+            var size: CUnsignedLong = 0
+            var isEmpty = false
 
-        mapnik_map_resize(map, Int32(clamping: options.width), Int32(clamping: options.height))
-        let previousBuffer = applyBuffer(options.bufferSize)
-        defer {
-            if let previousBuffer {
-                setBufferSize(previousBuffer)
+            try CErrors.withError(MapnikError.renderingFailed) { errorOut in
+                mapnik_map_render_to_buffer(
+                    map,
+                    options.scale,
+                    options.format.typeString,
+                    options.skipFullyTransparent,
+                    &data,
+                    &size,
+                    &isEmpty,
+                    errorOut)
             }
-        }
-        zoomAllIfUnset()
 
-        var data: UnsafeMutablePointer<UInt8>? = nil
-        var size: CUnsignedLong = 0
-        var isEmpty = false
+            if isEmpty || data == nil || size == 0 {
+                return nil
+            }
 
-        try CErrors.withError(MapnikError.renderingFailed) { errorOut in
-            mapnik_map_render_to_buffer(
-                map,
-                options.format.typeString,
-                options.skipFullyTransparent,
-                &data,
-                &size,
-                &isEmpty,
-                errorOut)
+            return dataBuffer(data, size: Int(size))
         }
-
-        if isEmpty || data == nil || size == 0 {
-            return nil
-        }
-        return dataBuffer(data, size: Int(size))
     }
 
     /// Renders a geographic bounding box (WGS 84 degrees) into an image.
@@ -516,23 +559,49 @@ public final class Mapnik: @unchecked Sendable {
 
     /// Renders the current map view to a file.
     ///
-    /// If the map has no extent yet, it first zooms to the layer extent.
+    /// If the map has no extent yet, it first zooms to the layer extent. The
+    /// map is resized for the render and restored afterwards.
     public func renderToFile(
         to url: URL,
         width: Int = 800,
         height: Int = 600,
         scale: Double = 1.0,
+        bufferSize: Int? = nil,
         format: ImageFormat = .webp(),
     ) throws {
-        try RenderOptions(width: width, height: height, scale: scale, format: format).validate()
+        try renderToFile(to: url, options: RenderOptions(
+            width: width,
+            height: height,
+            bufferSize: bufferSize,
+            scale: scale,
+            skipFullyTransparent: true,
+            format: format))
+    }
 
-        mapnik_map_resize(map, Int32(clamping: width), Int32(clamping: height))
-        zoomAllIfUnset()
+    /// Renders the current map view to a file with full option control.
+    public func renderToFile(to url: URL, options: RenderOptions) throws {
+        try options.validate()
+
+        let previousSize = size
+        mapnik_map_resize(map, Int32(clamping: options.width), Int32(clamping: options.height))
+        defer {
+            mapnik_map_resize(map, Int32(clamping: previousSize.width), Int32(clamping: previousSize.height))
+        }
+
+        let previousBuffer = applyBuffer(options.bufferSize)
+        defer {
+            if let previousBuffer {
+                setBufferSize(previousBuffer)
+            }
+        }
+        try zoomAllIfUnset()
 
         try CErrors.withError(MapnikError.renderingFailed) { errorOut in
             mapnik_map_render_to_file(
                 map,
-                format.typeString,
+                options.scale,
+                options.format.typeString,
+                options.skipFullyTransparent,
                 url.path(percentEncoded: false),
                 errorOut)
         }
@@ -554,13 +623,19 @@ public final class Mapnik: @unchecked Sendable {
     /// Vector output goes through mapnik's cairo backend and produces vector
     /// output for the layers that support it. If the map has no extent yet,
     /// it first zooms to the layer extent.
-    public func renderSVG(scale: Double = 1.0) throws -> Data {
-        try renderCairoSurface(.svg, scale: scale)
+    ///
+    /// - Parameters:
+    ///   - width: Page width in pixels; `nil` uses the map's current width.
+    ///   - height: Page height in pixels; `nil` uses the map's current height.
+    ///   - scale: Scale factor for symbolizer sizes.
+    /// - Returns: The SVG document bytes.
+    public func renderSVG(width: Int? = nil, height: Int? = nil, scale: Double = 1.0) throws -> Data {
+        try renderCairoSurface(.svg, width: width, height: height, scale: scale)
     }
 
     /// Renders the current map view as an SVG file.
-    public func renderSVG(to url: URL, scale: Double = 1.0) throws {
-        try renderCairoSurface(.svg, scale: scale, to: url)
+    public func renderSVG(to url: URL, width: Int? = nil, height: Int? = nil, scale: Double = 1.0) throws {
+        try renderCairoSurface(.svg, width: width, height: height, scale: scale, to: url)
     }
 
     /// Renders the current map view as a PDF document.
@@ -569,41 +644,80 @@ public final class Mapnik: @unchecked Sendable {
     /// PDF suits print/graphics workflows. If the map has no extent yet, it
     /// first zooms to the layer extent.
     ///
-    /// - Parameter scale: Scale factor for symbolizer sizes (`2.0` produces
-    ///   twice-size labels and line widths).
+    /// - Parameters:
+    ///   - width: Page width in pixels; `nil` uses the map's current width.
+    ///   - height: Page height in pixels; `nil` uses the map's current height.
+    ///   - scale: Scale factor for symbolizer sizes (`2.0` produces
+    ///     twice-size labels and line widths).
     /// - Returns: The PDF document bytes.
     /// - Throws: `MapnikError.renderingFailed` when rendering failed.
-    public func renderPDF(scale: Double = 1.0) throws -> Data {
-        try renderCairoSurface(.pdf, scale: scale)
+    public func renderPDF(width: Int? = nil, height: Int? = nil, scale: Double = 1.0) throws -> Data {
+        try renderCairoSurface(.pdf, width: width, height: height, scale: scale)
     }
 
     /// Renders the current map view as a PDF file.
-    public func renderPDF(to url: URL, scale: Double = 1.0) throws {
-        try renderCairoSurface(.pdf, scale: scale, to: url)
+    ///
+    /// - Parameters:
+    ///   - url: Destination file URL; replaced if it exists.
+    ///   - width: Page width in pixels; `nil` uses the map's current width.
+    ///   - height: Page height in pixels; `nil` uses the map's current height.
+    ///   - scale: Scale factor for symbolizer sizes.
+    public func renderPDF(to url: URL, width: Int? = nil, height: Int? = nil, scale: Double = 1.0) throws {
+        try renderCairoSurface(.pdf, width: width, height: height, scale: scale, to: url)
     }
 
     /// Renders the current map view as a PostScript document.
     ///
     /// Like `renderPDF`, but emitting PostScript (`.ps`) output.
-    public func renderPostScript(scale: Double = 1.0) throws -> Data {
-        try renderCairoSurface(.postScript, scale: scale)
+    /// Renders the current map view as a PostScript document.
+    ///
+    /// - Parameters:
+    ///   - width: Page width in pixels; `nil` uses the map's current width.
+    ///   - height: Page height in pixels; `nil` uses the map's current height.
+    ///   - scale: Scale factor for symbolizer sizes.
+    /// - Returns: The PostScript document bytes.
+    public func renderPostScript(width: Int? = nil, height: Int? = nil, scale: Double = 1.0) throws -> Data {
+        try renderCairoSurface(.postScript, width: width, height: height, scale: scale)
     }
 
     /// Renders the current map view as a PostScript file.
-    public func renderPostScript(to url: URL, scale: Double = 1.0) throws {
-        try renderCairoSurface(.postScript, scale: scale, to: url)
+    ///
+    /// - Parameters:
+    ///   - url: Destination file URL; replaced if it exists.
+    ///   - width: Page width in pixels; `nil` uses the map's current width.
+    ///   - height: Page height in pixels; `nil` uses the map's current height.
+    ///   - scale: Scale factor for symbolizer sizes.
+    public func renderPostScript(to url: URL, width: Int? = nil, height: Int? = nil, scale: Double = 1.0) throws {
+        try renderCairoSurface(.postScript, width: width, height: height, scale: scale, to: url)
     }
 
     // MARK: - Private (cairo)
 
     /// Renders a cairo vector surface into memory (via a temporary file,
     /// since mapnik exposes no to-buffer variant).
-    private func renderCairoSurface(_ surface: CairoSurfaceType, scale: Double) throws -> Data {
+    private func renderCairoSurface(
+        _ surface: CairoSurfaceType,
+        width: Int?,
+        height: Int?,
+        scale: Double,
+    ) throws -> Data {
         guard scale > 0, scale.isFinite else {
             throw MapnikError.invalidInput("scale must be positive and finite, got \(scale)")
         }
 
-        zoomAllIfUnset()
+        let previousSize = size
+        let targetSize = (width ?? previousSize.width, height ?? previousSize.height)
+        guard targetSize.0 > 0, targetSize.1 > 0 else {
+            throw MapnikError.invalidInput(
+                "width and height must be positive, got \(targetSize.0)x\(targetSize.1)")
+        }
+
+        mapnik_map_resize(map, Int32(clamping: targetSize.0), Int32(clamping: targetSize.1))
+        defer {
+            mapnik_map_resize(map, Int32(clamping: previousSize.width), Int32(clamping: previousSize.height))
+        }
+
+        try zoomAllIfUnset()
 
         var data: UnsafeMutablePointer<UInt8>? = nil
         var size: CUnsignedLong = 0
@@ -620,12 +734,30 @@ public final class Mapnik: @unchecked Sendable {
     }
 
     /// Renders a cairo vector surface to a file.
-    private func renderCairoSurface(_ surface: CairoSurfaceType, scale: Double, to url: URL) throws {
+    private func renderCairoSurface(
+        _ surface: CairoSurfaceType,
+        width: Int?,
+        height: Int?,
+        scale: Double,
+        to url: URL,
+    ) throws {
         guard scale > 0, scale.isFinite else {
             throw MapnikError.invalidInput("scale must be positive and finite, got \(scale)")
         }
 
-        zoomAllIfUnset()
+        let previousSize = size
+        let targetSize = (width ?? previousSize.width, height ?? previousSize.height)
+        guard targetSize.0 > 0, targetSize.1 > 0 else {
+            throw MapnikError.invalidInput(
+                "width and height must be positive, got \(targetSize.0)x\(targetSize.1)")
+        }
+
+        mapnik_map_resize(map, Int32(clamping: targetSize.0), Int32(clamping: targetSize.1))
+        defer {
+            mapnik_map_resize(map, Int32(clamping: previousSize.width), Int32(clamping: previousSize.height))
+        }
+
+        try zoomAllIfUnset()
 
         try CErrors.withError(MapnikError.renderingFailed) { errorOut in
             mapnik_map_render_to_cairo_file(
@@ -651,10 +783,10 @@ public final class Mapnik: @unchecked Sendable {
     ///   makes the serialization more explicit for round-tripping into
     ///   other tools.
     /// - Returns: The Mapnik XML document.
-    /// - Throws: `MapnikError.renderingFailed` when serialization failed.
+    /// - Throws: `MapnikError.serializationFailed` when serialization failed.
     public func saveXML(explicitDefaults: Bool = false) throws -> String {
         var slot: UnsafeMutablePointer<CChar>? = nil
-        try CErrors.withError(MapnikError.renderingFailed) { errorOut in
+        try CErrors.withError(MapnikError.serializationFailed) { errorOut in
             if let pointer = mapnik_map_save_xml(map, explicitDefaults, errorOut) {
                 slot = pointer
                 return true
@@ -663,7 +795,7 @@ public final class Mapnik: @unchecked Sendable {
         }
 
         guard let pointer = slot else {
-            throw MapnikError.renderingFailed("map XML serialization produced no output")
+            throw MapnikError.serializationFailed("map XML serialization produced no output")
         }
 
         defer { mapnik_free_string(pointer) }
@@ -674,10 +806,10 @@ public final class Mapnik: @unchecked Sendable {
     /// Serializes the current map back to a Mapnik XML file, replacing the
     /// file if it exists. See ``saveXML(explicitDefaults:)``.
     ///
-    /// - Throws: `MapnikError.renderingFailed` when serialization or writing
-    ///   failed.
+    /// - Throws: `MapnikError.serializationFailed` when serialization or
+    ///   writing failed.
     public func saveXML(to url: URL, explicitDefaults: Bool = false) throws {
-        try CErrors.withError(MapnikError.renderingFailed) { errorOut in
+        try CErrors.withError(MapnikError.serializationFailed) { errorOut in
             mapnik_map_save_xml_to_file(
                 map,
                 explicitDefaults,
@@ -696,16 +828,24 @@ public final class Mapnik: @unchecked Sendable {
     /// Web Mercator XYZ tiles; free-form rendering (`render`,
     /// `zoom(to:)`) happens in this SRS.
     public var srs: String {
+        // The shim reports the full length, so grow once if the string does
+        // not fit instead of silently truncating it. Long PROJ.4 strings
+        // (+towgs84, +nadgrids, +comment, ...) easily exceed 255 characters.
         var buffer = [CChar](repeating: 0, count: 256)
-        let length = mapnik_map_get_srs(map, &buffer, Int32(buffer.count))
+        var length = mapnik_map_get_srs(map, &buffer, Int32(buffer.count))
         guard length >= 0 else {
             return ""
         }
 
-        // Truncation (length >= buffer count) is practically impossible for
-        // projection strings; return what fits either way.
-        let bytes = buffer.map { UInt8(bitPattern: $0) }
-        return String(decoding: bytes.prefix(while: { $0 != 0 }), as: UTF8.self)
+        if length >= buffer.count {
+            buffer = [CChar](repeating: 0, count: Int(length) + 1)
+            length = mapnik_map_get_srs(map, &buffer, Int32(buffer.count))
+            guard length >= 0 else {
+                return ""
+            }
+        }
+
+        return String(decoding: buffer.prefix(while: { $0 != 0 }).map { UInt8(bitPattern: $0) }, as: UTF8.self)
     }
 
     /// Sets the map's projection string.
@@ -724,11 +864,17 @@ public final class Mapnik: @unchecked Sendable {
 
     /// Zooms the map so the given bounding box fits the current dimensions.
     ///
-    /// The box (WGS 84 degrees) is reprojected to the map's SRS first, which
-    /// works for Web Mercator maps as well as for maps with any other
-    /// projection. Note that the map itself is not resized; the box is
-    /// fitted into whatever dimensions the map currently has.
+    /// The box must be in WGS 84 degrees (a box without a projection is
+    /// assumed to be). It is reprojected to the map's SRS, which works for Web
+    /// Mercator maps as well as for maps with any other projection. Note that
+    /// the map itself is not resized; the box is fitted into whatever
+    /// dimensions the map currently has.
+    ///
+    /// - Throws: `MapnikError.invalidInput` if the box is not in geographic
+    ///   coordinates, `MapnikError.renderingFailed` if the reprojection fails.
     public func zoom(to bounds: BoundingBox) throws {
+        try bounds.validateGeographic()
+
         try CErrors.withError(MapnikError.renderingFailed) { errorOut in
             mapnik_map_zoom_to_wgs84_box(
                 map,
@@ -751,8 +897,11 @@ public final class Mapnik: @unchecked Sendable {
     }
 
     /// Sets the buffer (padding) in pixels used for subsequent renders.
+    ///
+    /// Negative values are clamped to 0; the render entry points reject a
+    /// negative `RenderOptions.bufferSize` instead.
     public func setBufferSize(_ pixels: Int) {
-        mapnik_map_set_buffer_size(map, Int32(clamping: pixels))
+        mapnik_map_set_buffer_size(map, Int32(clamping: max(0, pixels)))
     }
 
     /// The current buffer size in pixels.
@@ -767,16 +916,37 @@ public final class Mapnik: @unchecked Sendable {
 
     // MARK: - Layers
 
+    /// The number of layers defined by the stylesheet.
+    ///
+    /// Unlike ``layerNames``, this is the authoritative count for index-based
+    /// APIs such as ``layerVisible(_:)`` and ``layerSRS(_:)``.
+    public var layerCount: Int {
+        Int(mapnik_map_layer_count(map))
+    }
+
     /// The names of all layers defined by the stylesheet, in render order.
     public var layerNames: [String] {
-        let count = mapnik_map_layer_count(map)
+        let count = layerCount
         guard count > 0 else {
             return []
         }
 
-        return (0 ..< count).compactMap { index in
-            mapnik_map_layer_name(map, Int32(index)).map { String(cString: $0) }
+        return (0 ..< count).map { index in
+            mapnik_map_layer_name(map, Int32(index)).map { String(cString: $0) } ?? ""
         }
+    }
+
+    /// Converts a layer index for the C API, returning `nil` when it cannot
+    /// be represented.
+    ///
+    /// A plain `Int32(index)` traps for large values, which would crash the
+    /// caller instead of reporting "out of range".
+    private static func layerIndex(_ index: Int) -> Int32? {
+        guard index >= 0, index <= Int(Int32.max) else {
+            return nil
+        }
+
+        return Int32(index)
     }
 
     /// Shows or hides a layer by index (render order, 0-based).
@@ -789,12 +959,12 @@ public final class Mapnik: @unchecked Sendable {
 
     /// The visibility of the layer at `index`, or `nil` if out of range.
     public func layerVisible(_ index: Int) -> Bool? {
-        guard index >= 0 else {
+        guard let cIndex = Self.layerIndex(index) else {
             return nil
         }
 
         var visible = false
-        guard mapnik_map_layer_visible(map, Int32(index), &visible) else {
+        guard mapnik_map_layer_visible(map, cIndex, &visible) else {
             return nil
         }
 
@@ -805,6 +975,9 @@ public final class Mapnik: @unchecked Sendable {
     ///
     /// The box is in the layer's own SRS (see ``layerSRS(_:)``), as computed
     /// from the layer's datasource — the same value `zoomAll` unions over.
+    /// The returned `BoundingBox` carries that projection when the layer SRS
+    /// is a known EPSG code, so it can be reprojected directly; otherwise it
+    /// is `.noSRID` and the SRS string from ``layerSRS(_:)`` should be used.
     ///
     /// - Parameter index: The layer index, in render order, 0-based.
     /// - Throws: `MapnikError.renderingFailed` when the index is out of
@@ -830,9 +1003,32 @@ public final class Mapnik: @unchecked Sendable {
                 errorOut)
         }
 
+        let projection = layerSRS(index).flatMap(Self.projection(matching:)) ?? .noSRID
         return BoundingBox(
-            southWest: Coordinate3D(x: minX, y: minY, projection: .noSRID),
-            northEast: Coordinate3D(x: maxX, y: maxY, projection: .noSRID))
+            southWest: Coordinate3D(x: minX, y: minY, projection: projection),
+            northEast: Coordinate3D(x: maxX, y: maxY, projection: projection))
+    }
+
+    /// Maps a mapnik SRS string to a GISTools `Projection` when it names a
+    /// known EPSG code.
+    static func projection(matching srs: String) -> Projection? {
+        let lowered = srs.lowercased()
+        let digits: Substring? =
+            if let range = lowered.range(of: "epsg:") ?? lowered.range(of: "epsg::") {
+                lowered[range.upperBound...].prefix(while: \.isNumber)
+            }
+            else if let range = lowered.range(of: "init=epsg:") {
+                lowered[range.upperBound...].prefix(while: \.isNumber)
+            }
+            else {
+                nil
+            }
+
+        guard let digits, let srid = Int(digits) else {
+            return nil
+        }
+
+        return Projection(srid: srid)
     }
 
     /// The layer's projection string.
@@ -840,31 +1036,38 @@ public final class Mapnik: @unchecked Sendable {
     /// A PROJ.4 string or an EPSG code, as set by the stylesheet's layer
     /// `@srs` attribute. `nil` when the index is out of range.
     public func layerSRS(_ index: Int) -> String? {
-        guard index >= 0 else {
+        guard let cIndex = Self.layerIndex(index) else {
             return nil
         }
 
+        // The shim reports the full length, so grow once if the string does
+        // not fit instead of silently truncating it.
         var buffer = [CChar](repeating: 0, count: 256)
-        let length = mapnik_map_layer_srs(map, Int32(index), &buffer, Int32(buffer.count))
+        var length = mapnik_map_layer_srs(map, cIndex, &buffer, Int32(buffer.count))
         guard length >= 0 else {
             return nil
         }
 
-        // Truncation (length >= buffer count) is practically impossible for
-        // projection strings; return what fits either way.
-        let bytes = buffer.map { UInt8(bitPattern: $0) }
-        return String(decoding: bytes.prefix(while: { $0 != 0 }), as: UTF8.self)
+        if length >= buffer.count {
+            buffer = [CChar](repeating: 0, count: Int(length) + 1)
+            length = mapnik_map_layer_srs(map, cIndex, &buffer, Int32(buffer.count))
+            guard length >= 0 else {
+                return nil
+            }
+        }
+
+        return String(decoding: buffer.prefix(while: { $0 != 0 }).map { UInt8(bitPattern: $0) }, as: UTF8.self)
     }
 
     /// Whether the layer at `index` is queryable (responds to feature
     /// queries), or `nil` if out of range.
     public func layerQueryable(_ index: Int) -> Bool? {
-        guard index >= 0 else {
+        guard let cIndex = Self.layerIndex(index) else {
             return nil
         }
 
         var queryable = false
-        guard mapnik_map_layer_queryable(map, Int32(index), &queryable) else {
+        guard mapnik_map_layer_queryable(map, cIndex, &queryable) else {
             return nil
         }
 
@@ -875,12 +1078,12 @@ public final class Mapnik: @unchecked Sendable {
     /// (respecting the layer's min/max scale denominators and visibility),
     /// or `nil` if out of range.
     public func layerVisible(_ index: Int, atScaleDenominator scaleDenominator: Double) -> Bool? {
-        guard index >= 0 else {
+        guard let cIndex = Self.layerIndex(index) else {
             return nil
         }
 
         var visible = false
-        guard mapnik_map_layer_visible_at_scale(map, Int32(index), scaleDenominator, &visible) else {
+        guard mapnik_map_layer_visible_at_scale(map, cIndex, scaleDenominator, &visible) else {
             return nil
         }
 
@@ -911,6 +1114,9 @@ public final class Mapnik: @unchecked Sendable {
     /// quantized to those, which reduces tile sizes dramatically for flat
     /// cartography. Colors outside the palette still render through
     /// mapnik's internal error-diffusion.
+    ///
+    /// The output is always a PNG; `options.format` is ignored (mapnik's
+    /// palette path only supports PNG) and `options.scale` is not applied.
     public func renderPNG256(
         colors: [UInt32],
         width: Int = 256,
@@ -926,20 +1132,29 @@ public final class Mapnik: @unchecked Sendable {
     }
 
     /// Renders a palette-quantized PNG with full option control.
+    ///
+    /// The output is always a PNG; `options.format` is ignored (mapnik's
+    /// palette path only supports PNG) and `options.scale` is not applied.
+    /// `options.skipFullyTransparent` is honoured.
     public func renderPNG256(colors: [UInt32], options: RenderOptions) throws -> Data? {
         try options.validate()
         guard colors.isEmpty == false, colors.count <= 256 else {
             throw MapnikError.invalidInput("palette must contain 1...256 colors, got \(colors.count)")
         }
 
+        let previousSize = size
         mapnik_map_resize(map, Int32(clamping: options.width), Int32(clamping: options.height))
+        defer {
+            mapnik_map_resize(map, Int32(clamping: previousSize.width), Int32(clamping: previousSize.height))
+        }
+
         let previousBuffer = applyBuffer(options.bufferSize)
         defer {
             if let previousBuffer {
                 setBufferSize(previousBuffer)
             }
         }
-        zoomAllIfUnset()
+        try zoomAllIfUnset()
 
         var data: UnsafeMutablePointer<UInt8>? = nil
         var size: CUnsignedLong = 0
@@ -967,6 +1182,7 @@ public final class Mapnik: @unchecked Sendable {
             mapnik_map_render_to_buffer_with_palette(
                 map,
                 palette,
+                options.skipFullyTransparent,
                 &data,
                 &size,
                 &isEmpty,
@@ -979,21 +1195,157 @@ public final class Mapnik: @unchecked Sendable {
         return dataBuffer(data, size: Int(size))
     }
 
+    /// Renders the current map view as a palette-quantized PNG file.
+    ///
+    /// See ``renderPNG256(colors:options:)``; the file is replaced atomically.
+    public func renderPNG256ToFile(
+        colors: [UInt32],
+        to url: URL,
+        options: RenderOptions = RenderOptions(width: 256, height: 256, format: .png256),
+    ) throws {
+        try options.validate()
+        guard colors.isEmpty == false, colors.count <= 256 else {
+            throw MapnikError.invalidInput("palette must contain 1...256 colors, got \(colors.count)")
+        }
+
+        let previousSize = size
+        mapnik_map_resize(map, Int32(clamping: options.width), Int32(clamping: options.height))
+        defer {
+            mapnik_map_resize(map, Int32(clamping: previousSize.width), Int32(clamping: previousSize.height))
+        }
+
+        let previousBuffer = applyBuffer(options.bufferSize)
+        defer {
+            if let previousBuffer {
+                setBufferSize(previousBuffer)
+            }
+        }
+        try zoomAllIfUnset()
+
+        var creationError: String?
+        let palette: OpaquePointer? = colors.withUnsafeBufferPointer { buffer in
+            var errorOut: UnsafeMutablePointer<CChar>? = nil
+            defer {
+                if let pointer = errorOut {
+                    creationError = String(cString: pointer)
+                    mapnik_free_string(pointer)
+                }
+            }
+            return mapnik_palette_create(buffer.baseAddress, Int32(colors.count), &errorOut)
+        }
+
+        guard let palette else {
+            throw MapnikError.renderingFailed(creationError ?? "could not create palette")
+        }
+
+        defer { mapnik_palette_destroy(palette) }
+
+        try CErrors.withError(MapnikError.renderingFailed) { errorOut in
+            mapnik_map_render_to_file_with_palette(
+                map,
+                palette,
+                options.skipFullyTransparent,
+                url.path(percentEncoded: false),
+                errorOut)
+        }
+    }
+
     // MARK: - Private
+
+    /// Throws `MapnikError.invalidInput` unless `tile` is inside the XYZ grid.
+    ///
+    /// `MapTile` clamps `z` to `0...32` on construction, but mapnik only
+    /// supports zoom levels up to 30, so the upper bound is checked here.
+    private func validateTile(_ tile: MapTile) throws {
+        guard tile.z >= 0, tile.z <= 30 else {
+            throw MapnikError.invalidInput("zoom level must be in 0...30, got \(tile.z)")
+        }
+
+        let count = 1 << tile.z
+        guard tile.x >= 0, tile.x < count, tile.y >= 0, tile.y < count else {
+            throw MapnikError.invalidInput(
+                "tile coordinates (\(tile.x), \(tile.y)) out of range for zoom \(tile.z)")
+        }
+    }
+
+    /// Throws `MapnikError.invalidInput` unless the whole metatile block is
+    /// inside the XYZ grid.
+    private func validateMetatile(_ metatile: Metatile) throws {
+        try validateTile(metatile.origin)
+        let count = 1 << metatile.origin.z
+        guard metatile.origin.x + metatile.metaSize <= count,
+              metatile.origin.y + metatile.metaSize <= count
+        else {
+            throw MapnikError.invalidInput(
+                "metatile block (\(metatile.origin.x), \(metatile.origin.y)) + "
+                    + "\(metatile.metaSize)×\(metatile.metaSize) exceeds the tile grid for zoom \(metatile.origin.z)")
+        }
+    }
 
     /// Zooms to the layer extent if the map has no usable extent yet.
     ///
     /// A freshly loaded map has an inverted, empty extent; rendering it
     /// would always produce a fully transparent image.
-    func zoomAllIfUnset() {
+    ///
+    /// - Throws: `MapnikError.renderingFailed` when no layer has a usable
+    ///   extent, so a broken stylesheet surfaces instead of rendering empty.
+    func zoomAllIfUnset() throws {
         var minX: Double = 0
         var minY: Double = 0
         var maxX: Double = 0
         var maxY: Double = 0
         mapnik_map_get_extent(map, &minX, &minY, &maxX, &maxY)
         if (minX < maxX) == false || (minY < maxY) == false {
-            try? zoomAll()
+            try zoomAll()
         }
+    }
+
+    /// Runs `body` with a temporary map size and buffer override, restoring
+    /// both afterwards.
+    ///
+    /// Every render entry point needs the same prologue (validate, optionally
+    /// resize, apply the buffer, zoom if unset). Keeping it in one place is
+    /// what stops the paths from drifting apart, which is how `scale`,
+    /// `height` and `skipFullyTransparent` came to be ignored by some of them.
+    ///
+    /// - Parameters:
+    ///   - options: The render options to validate and apply.
+    ///   - resize: When true, the map is resized to `options.width` ×
+    ///     `options.height` for the duration of the call.
+    ///   - zoomIfUnset: When true, a map without a usable extent is zoomed to
+    ///     the layer extent first.
+    ///   - body: The render to perform.
+    /// - Returns: Whatever `body` returns.
+    private func withRenderState<T>(
+        _ options: RenderOptions,
+        resize: Bool,
+        zoomIfUnset: Bool = true,
+        body: () throws -> T,
+    ) throws -> T {
+        try options.validate()
+
+        let previousSize = size
+        if resize {
+            mapnik_map_resize(map, Int32(clamping: options.width), Int32(clamping: options.height))
+        }
+
+        let previousBuffer = applyBuffer(options.bufferSize)
+
+        defer {
+            if let previousBuffer {
+                setBufferSize(previousBuffer)
+            }
+
+            if resize {
+                mapnik_map_resize(map, Int32(clamping: previousSize.width), Int32(clamping: previousSize.height))
+            }
+        }
+
+        if zoomIfUnset {
+            try zoomAllIfUnset()
+        }
+
+        return try body()
     }
 
     /// Applies an optional buffer override, returning the previous buffer
