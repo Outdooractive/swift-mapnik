@@ -235,9 +235,13 @@ bool mapnik_map_zoom_to_layer(mapnik_map_t* map,
 // ---------------------------------------------------------------------------
 
 /// Render the current map view into memory.
+///
+/// `scale_factor` scales symbolizer sizes (line widths, fonts); the image
+/// dimensions are the map's own size multiplied by `scale_factor`.
 /// When `skip_empty` is true, fully transparent results produce
 /// `*is_empty = true` instead of an encoded image.
 bool mapnik_map_render_to_buffer(mapnik_map_t* map,
+                                 double scale_factor,
                                  const char* type,
                                  bool skip_empty,
                                  unsigned char** data,
@@ -246,18 +250,28 @@ bool mapnik_map_render_to_buffer(mapnik_map_t* map,
                                  char** error_out);
 
 /// Render the current map view to a file.
+///
+/// `scale_factor` behaves like in mapnik_map_render_to_buffer. When
+/// `skip_empty` is true a fully transparent image is not written and the
+/// call reports an error; when false the empty image is encoded and written.
 bool mapnik_map_render_to_file(mapnik_map_t* map,
+                               double scale_factor,
                                const char* type,
+                               bool skip_empty,
                                const char* output_path,
                                char** error_out);
 
 /// Render an XYZ tile (Web Mercator, Google scheme) into memory.
-/// `scale_factor` supports retina-style output (e.g. 2.0 for @2x tiles).
+///
+/// `tile_width`/`tile_height` are the tile edge lengths in pixels before
+/// `scale_factor`; they may differ for non-square tiles. `scale_factor`
+/// supports retina-style output (e.g. 2.0 for @2x tiles).
 bool mapnik_map_render_tile_to_buffer(mapnik_map_t* map,
                                       int tile_x,
                                       int tile_y,
                                       int zoom,
-                                      int tile_size,
+                                      int tile_width,
+                                      int tile_height,
                                       double scale_factor,
                                       const char* type,
                                       bool skip_empty,
@@ -266,14 +280,16 @@ bool mapnik_map_render_tile_to_buffer(mapnik_map_t* map,
                                       bool* is_empty,
                                       char** error_out);
 
-/// Render an XYZ tile to a file.
+/// Render an XYZ tile to a file. `tile_width`/`tile_height` as above.
 bool mapnik_map_render_tile_to_file(mapnik_map_t* map,
                                     int tile_x,
                                     int tile_y,
                                     int zoom,
-                                    int tile_size,
+                                    int tile_width,
+                                    int tile_height,
                                     double scale_factor,
                                     const char* type,
+                                    bool skip_empty,
                                     const char* output_path,
                                     char** error_out);
 
@@ -284,25 +300,31 @@ bool mapnik_map_render_tile_to_file(mapnik_map_t* map,
 ///
 /// `tile_x`/`tile_y` are the coordinates of the block's top-left (north-west)
 /// tile; the block spans tiles (tile_x .. tile_x + meta_size - 1,
-/// tile_y .. tile_y + meta_size - 1) at `zoom`.
+/// tile_y .. tile_y + meta_size - 1) at `zoom`. The whole block must lie
+/// inside the tile grid; out-of-range blocks are rejected.
+///
+/// `tile_width`/`tile_height` are the per-tile edge lengths in pixels before
+/// `scale_factor`; they may differ for non-square tiles.
 ///
 /// On success the raw premultiplied RGBA8 image of the whole metatile is
 /// written to `*data` (allocated with `new unsigned char[]`, release with
 /// `mapnik_free_buffer()`), its dimensions in pixels to `*out_width`/
 /// `*out_height`, and `*is_empty` reports whether the metatile is entirely
-/// transparent. When `*is_empty` is true the buffer is still allocated; the
-/// caller decides whether to keep it.
+/// transparent. When `skip_empty` is true and the metatile is fully
+/// transparent, no buffer is allocated and `*data` is NULL.
 ///
 /// Tile (dx, dy) within the metatile starts at pixel column
-/// `dx * tile_size * scale_factor`, row `dy * tile_size * scale_factor` and
-/// is `tile_size * scale_factor` pixels wide/tall.
+/// `dx * tile_width * scale_factor`, row `dy * tile_height * scale_factor`
+/// and is `tile_width * scale_factor` × `tile_height * scale_factor` pixels.
 bool mapnik_map_render_metatile(mapnik_map_t* map,
                                 int tile_x,
                                 int tile_y,
                                 int zoom,
-                                int tile_size,
+                                int tile_width,
+                                int tile_height,
                                 double scale_factor,
                                 int meta_size,
+                                bool skip_empty,
                                 unsigned char** data,
                                 unsigned long* size,
                                 int* out_width,
@@ -412,15 +434,16 @@ char* mapnik_datasource_inspect(mapnik_datasource_t* datasource,
 
 /// List the sub-layers of an OGR datasource.
 ///
-/// Writes up to `buffer_count` layer names into `layers_out` (each a pointer
-/// into the internal, statically cached message string — copy before the
-/// next call). Returns the total number of names available, or -1 with
-/// details in `*error_out` when the datasource is not an OGR source or the
-/// message cannot be parsed. Used to fill sublayer selectors in editor UIs.
-int mapnik_datasource_ogr_layers(mapnik_datasource_t* datasource,
-                                 const char** layers_out,
-                                 int buffer_count,
-                                 char** error_out);
+/// Returns a NUL-separated buffer (`name\0name\0...\0`, an empty list yields an
+/// empty string) allocated with `new char[]` and released with
+/// `mapnik_free_string()`. Returns NULL with details in `*error_out` when the
+/// datasource is not an OGR source or the message cannot be parsed.
+///
+/// The result is owned by the caller, so it has no lifetime coupling to the
+/// next call and is safe to use from concurrent callers. Used to fill sublayer
+/// selectors in editor UIs.
+char* mapnik_datasource_ogr_layers(mapnik_datasource_t* datasource,
+                                   char** error_out);
 
 // ---------------------------------------------------------------------------
 // Feature queries
@@ -543,6 +566,7 @@ void mapnik_palette_destroy(mapnik_palette_t* palette);
 /// Only "png" types support palettes.
 bool mapnik_map_render_to_buffer_with_palette(mapnik_map_t* map,
                                               mapnik_palette_t* palette,
+                                              bool skip_empty,
                                               unsigned char** data,
                                               unsigned long* size,
                                               bool* is_empty,
@@ -551,6 +575,7 @@ bool mapnik_map_render_to_buffer_with_palette(mapnik_map_t* map,
 /// Like mapnik_map_render_to_file, but quantizes the PNG output to `palette`.
 bool mapnik_map_render_to_file_with_palette(mapnik_map_t* map,
                                             mapnik_palette_t* palette,
+                                            bool skip_empty,
                                             const char* output_path,
                                             char** error_out);
 

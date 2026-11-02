@@ -7,8 +7,9 @@ import Testing
 @Suite("Available fonts")
 struct AvailableFontsTests {
 
+    /// Available fonts returns registered face names.
     @Test
-    func `available fonts returns registered face names`() throws {
+    func availableFontsReturnsRegisteredFaceNames() throws {
         let fonts = try MapnikConfig.availableFonts()
 
         #expect(fonts.isEmpty == false)
@@ -17,8 +18,9 @@ struct AvailableFontsTests {
         #expect(fonts.count >= 1)
     }
 
+    /// Available fonts are sorted in registration order without duplicates.
     @Test
-    func `available fonts are sorted in registration order without duplicates`() throws {
+    func availableFontsAreSortedInRegistrationOrderWithoutDuplicates() throws {
         let fonts = try MapnikConfig.availableFonts()
 
         // No empty names and no duplicates (mapnik registers each face once).
@@ -26,16 +28,18 @@ struct AvailableFontsTests {
         #expect(Set(fonts).count == fonts.count)
     }
 
+    /// Label style face name is available.
     @Test
-    func `label style face name is available`() throws {
+    func labelStyleFaceNameIsAvailable() throws {
         // The test fixtures use "DejaVu Sans Book", registered by the
         // platform font directories on both macOS and Linux.
         let fonts = try MapnikConfig.availableFonts()
         #expect(fonts.contains("DejaVu Sans Book"))
     }
 
+    /// Available fonts is callable repeatedly.
     @Test
-    func `available fonts is callable repeatedly`() throws {
+    func availableFontsIsCallableRepeatedly() throws {
         // The enumeration touches mapnik's global registry; calling it
         // repeatedly (including from concurrent tasks) must be safe and
         // stable.

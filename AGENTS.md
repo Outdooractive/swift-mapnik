@@ -40,13 +40,14 @@ Sources/Mapnik/
 ├── MapnikDatasource.swift # datasource from parameters + inspect() → DatasourceInfo
 ├── MapnikError.swift    # error type bridging the C error strings
 ├── MapnikPool.swift     # thread-safe pool with per-object use limits
+├── FeatureQuery.swift   # queryPoint (map layer) + queryBox (datasource)
 ├── TileSequence.swift   # TileSequence (tiles ∩ bbox across zooms) +
 │                        #   TileGenerator (thread-safe shared cursor) +
 │                        #   MetatileSequence/MetatileGenerator (aligned
 │                        #   metatile blocks for bulk rendering)
 ├── TilelistBuilder.swift # tilelist JSON (zoom → row → [minX, maxX] ranges)
 ├── WorkQueue.swift      # actor with bounded concurrency for bulk rendering
-└── Extensions/          # GISTools helpers (BoundingBox "x1,y1,x2,y2" parsing)
+└── Extensions/          # BoundingBox "x1,y1,x2,y2" parsing + projection helpers
 Sources/MapnikC/         # C shim: mapnik_c.cpp + include/mapnik_c.h
 Tests/MapnikTests/       # Swift Testing: rendering + unit tests
 ```
@@ -153,8 +154,9 @@ is needed.
   target's only dependency is GISTools)
 - AVOID force unwraps and force `try` unless it is unrecoverable
 - Assume strict Swift concurrency rules are being applied (`Mapnik`,
-  `MapnikPool`, `TileGenerator` and `TilelistBuilder` are
-  `@unchecked Sendable` because their internal state is lock-protected)
+  `MapnikPool`, `TileGenerator`, `MetatileGenerator`, `TilelistBuilder` and
+  `MapnikDatasource` are `@unchecked Sendable` because their internal state is
+  lock-protected)
 
 ## Code style conventions
 
@@ -162,30 +164,85 @@ is needed.
 `Sendable` conformance on all model types. Formatting is enforced with
 [SwiftFormat](https://github.com/nicklockwood/SwiftFormat) (`.swiftformat`
 in the repo root): run `swiftformat Sources Tests --swift-version 6.3`
-before finishing. Key rules:
+before finishing, and `swiftformat Sources Tests --swift-version 6.3 --lint`
+to verify. CI runs the lint.
+
+These rules mirror [gis-tools](https://github.com/Outdooractive/gis-tools)
+so the two packages stay consistent.
 
 ### Spacing
 
 - 4-space indentation, no tabs
+- Semicolons: A line with a semicolon is probably a two-liner.
 - Commas: Left-hugging, space follows. `x, y`
+- Generic parameters: Add spacing after the comma. `Type<T, U>`
+- Braces: Always with a space on the inside. `{ get set }`
 - Binary operators: single-space padding before and after. `a + (b * c)`
+- Use parentheses in mathematical expressions to ease understanding even
+  when not necessary. `a + (b * c)`
 - Return arrow tokens: Spaces on both sides. `f() -> T`
-- Ranges: spaces on both sides. `1 ... 3`
-- Trailing closure: space before opening brace. `function() { ... }`
-- Comments: space between delimiters and text. `// comment`
-- Trailing whitespace: Never.
+- Ranges: spaces on both sides. `1 ... 3`, `1 ..< 4`
+- Unterminated ranges: omit spacing. `1...`
+- Empty constructs: no internal spaces. `[]`, `[:]`, `{}`, `f()`
+- Trailing closure: space before the opening brace. `function() { ... }`
+- Functional closure: trim spaces before the opening parenthesis.
+  `compactMap({ $0 })`
+- Comments: space between delimiters and text. `// comment`, `/* comment */`
+- Trailing whitespace: never. Last file line: a single newline.
 
 ### General
 
 - Multiple `if` conditions separated by `,`, not `&&`. `if a == 1, b == 2 {}`
 - Use `isNotEmpty` instead of `!isEmpty`
 - Left-hugging colons with space after. `let x: [String: String]`
+- Don't left-hug colons in ternary expressions: `a ? b : c`
 - `struct` by default, `class` only when needed, `actor` for mutable shared state
 - `Sendable` conformance on all model types
 - `guard let` / `if let` with early returns
 - `// MARK:` and `// MARK: -` to organize extensions
 - `PascalCase` for types, `camelCase` for everything else
 - Put `else` on its own line
+- Attributes (`@discardableResult`, `@Test`, …) on their own line above the
+  declaration
+- Number literals: three-place decimal chunking (`1_000_000`), two-place hex
+  chunking (`FF_AB_01`), always a fraction for floating point (`1.0`)
+- One file per type/algorithm, named `TypeName.swift`
+- One test struct per algorithm/type (`struct MapnikPoolTests`)
+- Key path expressions (`\.property`) over closures where possible
+
+### Ternary expressions
+
+Keep short ternaries on one line:
+
+```swift
+let result = booleanCondition ? value1 : value2
+```
+
+Split longer ones into three aligned lines:
+
+```swift
+let result = booleanCondition
+    ? value1
+    : value2
+```
+
+### Argument wrapping
+
+If a method has ≤3 parameters and no return value, or ≤2 parameters and a
+return value, put the whole signature on one line (exception: line exceeds
+80 characters). Otherwise split parameters one per line with the opening
+brace on its own line. The same applies to call sites.
+
+### Test naming
+
+Test functions are plain `camelCase` identifiers, not backticked prose, with
+a one-line `///` description above `@Test`:
+
+```swift
+/// Rendering an intersecting tile returns image bytes.
+@Test
+func renderingIntersectingTileReturnsImageBytes() throws {
+```
 
 ### C/C++ shim conventions
 
@@ -196,9 +253,17 @@ before finishing. Key rules:
 - Every public shim function has a DocC-style `///` comment in
   `include/mapnik_c.h` describing ownership and lifetime of returned
   pointers.
+- Never hand out pointers into process-wide static storage; return an owned
+  buffer instead.
 
 ## Repository extras
 
 - The test fixtures in `Tests/MapnikTests/` are inline GeoJSON
   (polygons over Europe, a synthetic 2×2 TIFF built from raw bytes) and
   landmark coordinates (Berlin, New York) — no external data files.
+- The suite does need the **DejaVu** fonts (the label fixture references
+  `DejaVu Sans Book`) and the **GDAL** input plugin (the raster test opens a
+  GeoTIFF). Install `fonts-dejavu-core` + `libmapnik-dev` on Linux, or
+  `--cask font-dejavu-sans` + `mapnik` on macOS.
+- Test functions are camelCase with a `///` description, never backticked
+  prose (see the style section).

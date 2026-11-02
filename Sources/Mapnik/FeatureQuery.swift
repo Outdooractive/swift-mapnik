@@ -5,8 +5,9 @@ import MapnikC
 /// A feature returned by a feature query: identifier, geometry and
 /// attributes.
 ///
-/// Produced by ``Mapnik/queryPoint(layerIndex:at:maxFeatures:)`` and
-/// ``MapnikDatasource/queryBox(_:maxFeatures:)``.
+/// The query APIs return GISTools `Feature` values; this type is not produced
+/// by them.
+@available(*, deprecated, message: "queryPoint and queryBox return GISTools Feature values")
 public struct QueriedFeature: Sendable {
 
     /// The feature's mapnik id.
@@ -34,8 +35,13 @@ enum FeatureQueryParser {
     /// `Feature` values.
     ///
     /// Geometry-less features (attributes-only hits, e.g. raster datasources)
-    /// are dropped: GISTools `Feature` requires a geometry.
-    static func parseFeatures(json: Data) throws -> [Feature] {
+    /// are dropped: GISTools `Feature` requires a geometry. Features whose
+    /// geometry fails to decode are dropped as well, and the count is reported
+    /// through `dropped` so callers are not left guessing why the result is
+    /// short.
+    static func parseFeatures(json: Data, dropped: inout Int) throws -> [Feature] {
+        dropped = 0
+
         guard let document = try JSONSerialization.jsonObject(with: json, options: []) as? [String: Any],
               let rawFeatures = document["features"] as? [[String: Any]]
         else {
@@ -46,9 +52,16 @@ enum FeatureQueryParser {
         features.reserveCapacity(rawFeatures.count)
 
         for raw in rawFeatures {
-            guard let id = raw["id"] as? Int else {
-                continue
-            }
+            // mapnik ids are unsigned; JSONSerialization hands them over as
+            // NSNumber, so decode through it and fall back to 0 rather than
+            // dropping the feature for an out-of-range id.
+            let id: Int = {
+                guard let number = raw["id"] as? NSNumber else {
+                    return 0
+                }
+
+                return Int(exactly: number.int64Value) ?? 0
+            }()
 
             let properties: [String: Sendable] = (raw["properties"] as? [String: Any])?
                 .compactMapValues { value -> Sendable? in
@@ -65,10 +78,12 @@ enum FeatureQueryParser {
                         if number.objCType[0] == Int8(99) { // "c" = boolean
                             return number.boolValue
                         }
+
                         let doubleValue = number.doubleValue
                         if doubleValue.rounded() == doubleValue, doubleValue >= Double(Int.min), doubleValue <= Double(Int.max) {
                             return Int(doubleValue)
                         }
+
                         return doubleValue
 
                     default:
@@ -77,14 +92,16 @@ enum FeatureQueryParser {
                 }
                 ?? [:]
 
-            guard let wkbHex = raw["wkb"] as? String else {
-                // Attributes-only hit: GISTools Feature requires a geometry.
+            guard let wkbHex = raw["wkb"] as? String, let wkb = Data(hexEncoded: wkbHex) else {
+                // Attributes-only hit (or an unreadable geometry): GISTools
+                // Feature requires a geometry.
+                dropped += 1
                 continue
             }
 
             do {
                 let geometry = try WKBCoder.decode(
-                    wkb: Data(hexEncoded: wkbHex) ?? Data(),
+                    wkb: wkb,
                     sourceProjection: .noSRID,
                     targetProjection: .noSRID)
                 features.append(Feature(
@@ -94,10 +111,7 @@ enum FeatureQueryParser {
                     calculateBoundingBox: true))
             }
             catch {
-                // A broken geometry must not drop the feature; skip it with
-                // a note (the attribute values are unavailable without a
-                // geometry in GISTools' model).
-                continue
+                dropped += 1
             }
         }
 
@@ -154,8 +168,9 @@ extension Mapnik {
     ///   - maxFeatures: Maximum number of features to return.
     /// - Returns: The features intersecting the coordinate (attributes plus
     ///   geometry in the map SRS).
-    /// - Throws: `MapnikError.invalidInput` for out-of-range input,
-    ///   `MapnikError.renderingFailed` when the query fails.
+    /// - Throws: `MapnikError.invalidInput` for out-of-range input or a
+    ///   coordinate in a non-geographic projection, `MapnikError.renderingFailed`
+    ///   when the query fails.
     public func queryPoint(
         at coordinate: Coordinate3D,
         layerIndex: Int,
@@ -164,8 +179,19 @@ extension Mapnik {
         guard maxFeatures > 0 else {
             throw MapnikError.invalidInput("maxFeatures must be positive, got \(maxFeatures)")
         }
-        guard layerIndex >= 0, layerIndex < layerNames.count else {
-            throw MapnikError.invalidInput("layer index \(layerIndex) out of range for \(layerNames.count) layers")
+        guard layerIndex >= 0, layerIndex < layerCount else {
+            throw MapnikError.invalidInput("layer index \(layerIndex) out of range for \(layerCount) layers")
+        }
+
+        // A coordinate in another projection would be silently read as
+        // lon/lat, returning no features.
+        switch coordinate.projection.kind {
+        case .geographic, .undefined:
+            break
+        case .geocentric, .planar:
+            throw MapnikError.invalidInput(
+                "coordinate must be in WGS 84 degrees (EPSG:4326), got \(coordinate.projection); "
+                    + "use queryPoint(x:y:layerIndex:) for map-SRS coordinates")
         }
 
         var x: Double = 0
@@ -208,12 +234,12 @@ extension Mapnik {
         guard maxFeatures > 0 else {
             throw MapnikError.invalidInput("maxFeatures must be positive, got \(maxFeatures)")
         }
-        guard layerIndex >= 0, layerIndex < layerNames.count else {
-            throw MapnikError.invalidInput("layer index \(layerIndex) out of range for \(layerNames.count) layers")
+        guard layerIndex >= 0, layerIndex < layerCount else {
+            throw MapnikError.invalidInput("layer index \(layerIndex) out of range for \(layerCount) layers")
         }
 
         // A fresh map has no usable extent; mapnik's query_point requires one.
-        zoomAllIfUnset()
+        try zoomAllIfUnset()
 
         var jsonSlot: UnsafeMutablePointer<CChar>? = nil
         do {
@@ -252,7 +278,8 @@ extension Mapnik {
         }
 
         let json = Data(bytes: jsonPointer, count: strlen(jsonPointer))
-        return try FeatureQueryParser.parseFeatures(json: json)
+        var dropped = 0
+        return try FeatureQueryParser.parseFeatures(json: json, dropped: &dropped)
     }
 
 }
@@ -305,7 +332,8 @@ extension MapnikDatasource {
         }
 
         let json = Data(bytes: jsonPointer, count: strlen(jsonPointer))
-        return try FeatureQueryParser.parseFeatures(json: json)
+        var dropped = 0
+        return try FeatureQueryParser.parseFeatures(json: json, dropped: &dropped)
     }
 
 }

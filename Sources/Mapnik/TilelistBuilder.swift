@@ -25,6 +25,7 @@ public final class TilelistBuilder: @unchecked Sendable {
     private var state = State()
     private let lock = NSLock()
 
+    /// Creates an empty builder.
     public init() {}
 
     /// Adds a single tile to the list.
@@ -59,8 +60,11 @@ public final class TilelistBuilder: @unchecked Sendable {
     ///
     /// Encodes as a dictionary keyed by zoom level (as string), each holding
     /// a dictionary keyed by tile row (as string), each holding an array of
-    /// `[minX, maxX]` ranges. Wrap it in `["all": builder.tilelist]` to match
-    /// the tileserver schema exactly.
+    /// `[minX, maxX]` ranges.
+    ///
+    /// The top-level `"all"` key is part of this value, so encode the tilelist
+    /// directly (`JSONEncoder().encode(builder.tilelist)`) rather than wrapping
+    /// it in `["all": ...]` again.
     public var tilelist: Tilelist {
         lock.lock()
         defer { lock.unlock() }
@@ -109,6 +113,7 @@ public final class TilelistBuilder: @unchecked Sendable {
         /// zoom level (as string) → tile row (as string) → [minX, maxX] ranges.
         public var all: [String: [String: [[Int]]]]
 
+        /// Creates a tilelist from its JSON-ready representation.
         public init(all: [String: [String: [[Int]]]]) {
             self.all = all
         }
