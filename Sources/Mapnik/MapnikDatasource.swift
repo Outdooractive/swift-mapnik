@@ -99,11 +99,16 @@ extension DatasourceInfo: Decodable {
 
         let rawFields = try container.decode([[String]].self, forKey: .fields)
         self.fields = rawFields.compactMap { pair in
-            guard pair.count == 2, let type = DatasourceFieldType(rawValue: pair[1]) else {
+            guard pair.count == 2 else {
                 return nil
             }
 
-            return DatasourceField(name: pair[0], type: type)
+            // An unrecognised type string (a future mapnik attribute type, a
+            // plugin-specific name) becomes .unknown instead of dropping the
+            // field: the name is still useful to an editor UI.
+            return DatasourceField(
+                name: pair[0],
+                type: DatasourceFieldType(rawValue: pair[1]) ?? .unknown)
         }
 
         self.features = try container.decodeIfPresent([[String: JSONValue]].self, forKey: .features) ?? []
@@ -292,42 +297,56 @@ public final class MapnikDatasource: @unchecked Sendable {
     /// - Throws: `MapnikError.renderingFailed` when mapnik fails for a
     ///   different reason (e.g. an unreadable file).
     public func ogrLayerNames() throws -> [String]? {
-        var slots = [UnsafePointer<CChar>?](repeating: nil, count: 64)
         var slot: UnsafeMutablePointer<CChar>? = nil
         var message: String? = nil
-        var count: Int32 = 0
 
-        let ok = withUnsafeMutablePointer(to: &slot) { slotPointer -> Bool in
+        let pointer = withUnsafeMutablePointer(to: &slot) { slotPointer -> UnsafeMutablePointer<CChar>? in
             defer {
-                if let pointer = slotPointer.pointee {
-                    message = String(cString: pointer)
-                    mapnik_free_string(pointer)
+                if let errorPointer = slotPointer.pointee {
+                    message = String(cString: errorPointer)
+                    mapnik_free_string(errorPointer)
                 }
             }
-            let result = slots.withUnsafeMutableBufferPointer { buffer -> Int32 in
-                mapnik_datasource_ogr_layers(
-                    datasource,
-                    buffer.baseAddress,
-                    Int32(buffer.count),
-                    slotPointer)
-            }
-            if result >= 0 {
-                count = result
-                return true
-            }
-            return false
+            return mapnik_datasource_ogr_layers(datasource, slotPointer)
         }
 
-        if ok {
-            return slots.prefix(Int(count)).compactMap { $0.map { String(cString: $0) } }
+        if let pointer {
+            // The buffer is NUL-separated; an empty list is an empty string.
+            defer { mapnik_free_string(pointer) }
+            return Self.parseNames(pointer)
         }
 
         // "No sub-layers" is the normal negative outcome; anything else is
         // a real failure.
-        if message == "datasource has no sub-layers" {
+        if message == Self.noSubLayersMessage {
             return nil
         }
+
         throw MapnikError.renderingFailed(message ?? "could not enumerate the datasource layers")
+    }
+
+    /// The shim's message for "this datasource has no sub-layers".
+    ///
+    /// Shared with the C shim so the two cannot drift apart silently.
+    static let noSubLayersMessage = "datasource has no sub-layers"
+
+    /// Splits a NUL-separated name buffer into strings.
+    private static func parseNames(_ pointer: UnsafeMutablePointer<CChar>) -> [String] {
+        var names: [String] = []
+        var offset = 0
+
+        while true {
+            let current = pointer + offset
+            let length = strlen(current)
+            if length == 0 {
+                break
+            }
+
+            names.append(String(cString: current))
+            offset += length + 1
+        }
+
+        return names
     }
 
 }
