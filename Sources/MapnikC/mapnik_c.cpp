@@ -1878,6 +1878,14 @@ mapnik_datasource_t* mapnik_datasource_create(const char* const* keys,
 }
 
 void mapnik_datasource_destroy(mapnik_datasource_t* datasource) {
+    if (datasource == nullptr) {
+        return;
+    }
+
+    // Destruction touches the same global registries as creation, so it takes
+    // the same lifecycle mutex; otherwise a datasource could be torn down
+    // while another thread is loading a stylesheet.
+    std::lock_guard<std::mutex> lock(mapnik_lifecycle_mutex());
     delete datasource;
 }
 

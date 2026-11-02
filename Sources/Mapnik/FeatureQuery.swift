@@ -39,6 +39,15 @@ enum FeatureQueryParser {
     /// geometry fails to decode are dropped as well, and the count is reported
     /// through `dropped` so callers are not left guessing why the result is
     /// short.
+    /// True when `number` is one of Foundation's JSON boolean singletons.
+    ///
+    /// `JSONSerialization` returns the shared boolean instances for `true` and
+    /// `false`, so identity comparison is reliable and portable, unlike
+    /// inspecting `objCType`.
+    private static func isBooleanNumber(_ number: NSNumber) -> Bool {
+        number === NSNumber(value: true) || number === NSNumber(value: false)
+    }
+
     static func parseFeatures(json: Data, dropped: inout Int) throws -> [Feature] {
         dropped = 0
 
@@ -73,9 +82,11 @@ enum FeatureQueryParser {
                         return string
 
                     case let number as NSNumber:
-                        // JSON booleans arrive as NSNumber (objCType "c");
-                        // keep them bool, then integer when exact.
-                        if number.objCType[0] == Int8(99) { // "c" = boolean
+                        // JSON booleans arrive as NSNumber. `objCType` is a
+                        // Foundation implementation detail (and "c" also
+                        // matches small integers on some versions), so compare
+                        // against the shared boolean instances instead.
+                        if isBooleanNumber(number) {
                             return number.boolValue
                         }
 

@@ -19,8 +19,12 @@ public enum ImageFormat: Sendable, Hashable {
     /// Uncompressed TIFF.
     case tiff
 
-    /// SVG output via the cairo backend. Vector output ignores raster-only
-    /// options; use `Mapnik.renderSVG(...)` instead of the pixel formats.
+    /// SVG output via the cairo backend.
+    ///
+    /// This case exists so a format value can describe vector output, but it
+    /// is **not** usable with the raster render entry points: every
+    /// `RenderOptions`-based render rejects it. Use
+    /// ``Mapnik/renderSVG(width:height:scale:)`` instead.
     case svg
 
     /// The mapnik image type string for this format (e.g. `"webp:quality=80"`).

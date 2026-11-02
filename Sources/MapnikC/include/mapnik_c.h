@@ -535,9 +535,12 @@ bool mapnik_counting_datasource_push_polygon(mapnik_counting_datasource_t* datas
                                              const char* name,
                                              char** error_out);
 
-/// Attach the datasource to the layer at `index` of the map. The map keeps a
-/// shared reference; the caller must keep the handle alive while the map is
-/// in use (or until replaced).
+/// Attach the datasource to the layer at `index` of the map.
+///
+/// The layer keeps a `shared_ptr` reference, so the map stays usable even
+/// after the handle is destroyed; the handle only needs to outlive the call
+/// itself. Destroying it early is therefore safe, and `mapnik_map_destroy`
+/// releases the last reference when the map goes away.
 bool mapnik_map_use_counting_datasource(mapnik_map_t* map,
                                         int layer_index,
                                         mapnik_counting_datasource_t* datasource,

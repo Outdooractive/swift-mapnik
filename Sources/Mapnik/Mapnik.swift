@@ -152,6 +152,11 @@ public final class Mapnik: @unchecked Sendable {
         }
     }
 
+    /// Destroys the underlying map object.
+    ///
+    /// - Note: This acquires the process-wide lifecycle lock, so it may block
+    ///   while another map is being created or loaded. Mapnik's global
+    ///   registries cannot be touched concurrently, so the lock is required.
     deinit {
         Self.lifecycleLock.withLock {
             mapnik_map_destroy(map)
@@ -165,9 +170,13 @@ public final class Mapnik: @unchecked Sendable {
     /// Tiles are always rendered in Web Mercator, regardless of the map's
     /// `srs`: the tile bounding box (EPSG:3857) is used as the map's extent
     /// for the duration of the call, and mapnik reprojects layer data into
-    /// the map SRS on the fly. Rendering XYZ tiles of a map whose SRS is not
-    /// Web Mercator (e.g. `epsg:4326`) is therefore valid, but the tile grid
-    /// geometry is still Web Mercator's.
+    /// the map SRS on the fly.
+    ///
+    /// - Warning: on a map whose `srs` is not Web Mercator the tile box is
+    ///   interpreted in that SRS, not reprojected. For an `epsg:4326` map the
+    ///   extent becomes ±20037508 *degrees*, so the tile renders empty. Set
+    ///   the map SRS to `epsg:3857` (the default for stylesheets that omit
+    ///   `@srs`) before rendering XYZ tiles.
     ///
     /// - Parameters:
     ///   - x: Tile column at zoom `z`, 0 ..< 2^z.

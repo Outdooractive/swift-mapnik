@@ -185,16 +185,14 @@ public final class MapnikDatasource: @unchecked Sendable {
             }
             return keys.withUnsafeBufferPointer { keysBuffer in
                 values.withUnsafeBufferPointer { valuesBuffer in
-                    // The C API expects `const char* const*`; the Swift
-                    // arrays are `[UnsafePointer<CChar>?]`, contiguous and
-                    // NUL-free by construction.
-                    let keysPointer = UnsafeRawPointer(keysBuffer.baseAddress!)
-                        .assumingMemoryBound(to: UnsafePointer<CChar>?.self)
-                    let valuesPointer = UnsafeRawPointer(valuesBuffer.baseAddress!)
-                        .assumingMemoryBound(to: UnsafePointer<CChar>?.self)
-                    return mapnik_datasource_create(
-                        keysPointer,
-                        valuesPointer,
+                    // The C API takes `const char* const*`; the Swift arrays
+                    // are already `[UnsafePointer<CChar>?]`, so pass their
+                    // storage directly instead of reinterpreting it through
+                    // UnsafeRawPointer + assumingMemoryBound (undefined
+                    // behaviour).
+                    mapnik_datasource_create(
+                        keysBuffer.baseAddress,
+                        valuesBuffer.baseAddress,
                         Int32(clamping: parameters.count),
                         slotPointer)
                 }
@@ -223,9 +221,10 @@ public final class MapnikDatasource: @unchecked Sendable {
     ///     geographic extent is computed by transforming the native extent
     ///     from this SRS to WGS84. Pass the layer's `srs` field.
     ///   - fieldFilter: Optional set of attribute names to report and
-    ///     sample; `nil` reports every field. Useful to trim wide tables
-    ///     down to the attributes the editor shows. Geometry samples are
-    ///     available through ``MapnikDatasource/queryBox(_:maxFeatures:)``.
+    ///     sample; `nil` or an empty set reports every field. This is a
+    ///     membership filter: the output keeps the datasource's field order,
+    ///     it does not follow the order of the set. Useful to trim wide
+    ///     tables down to the attributes the editor shows.
     /// - Returns: The parsed ``DatasourceInfo``.
     /// - Throws: `MapnikError.renderingFailed` when mapnik fails to open or
     ///   describe the datasource.
