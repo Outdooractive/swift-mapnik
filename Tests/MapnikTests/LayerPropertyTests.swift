@@ -9,7 +9,7 @@ struct LayerPropertyTests {
 
     /// Layer envelope matches the datasource extent.
     @Test
-    func `layer envelope matches the datasource extent`() throws {
+    func layerEnvelopeMatchesTheDatasourceExtent() throws {
         let map = try Mapnik(xml: Fixtures.multiLayerStyle)
 
         // Both layers use the same inline GeoJSON: lon -10..40, lat 35..70.
@@ -25,7 +25,7 @@ struct LayerPropertyTests {
 
     /// Layer envelope throws for out of range and empty layers.
     @Test
-    func `layer envelope throws for out of range and empty layers`() throws {
+    func layerEnvelopeThrowsForOutOfRangeAndEmptyLayers() throws {
         let map = try Mapnik(xml: Fixtures.multiLayerStyle)
 
         #expect(throws: MapnikError.self) {
@@ -38,7 +38,7 @@ struct LayerPropertyTests {
 
     /// Layer SRS comes from the stylesheet.
     @Test
-    func `layer SRS comes from the stylesheet`() throws {
+    func layerSRSComesFromTheStylesheet() throws {
         let map = try Mapnik(xml: Fixtures.multiLayerStyle)
 
         #expect(map.layerSRS(0) == "epsg:4326")
@@ -49,7 +49,7 @@ struct LayerPropertyTests {
 
     /// Layer queryable status defaults to false.
     @Test
-    func `layer queryable status defaults to false`() throws {
+    func layerQueryableStatusDefaultsToFalse() throws {
         let map = try Mapnik(xml: Fixtures.multiLayerStyle)
 
         #expect(map.layerQueryable(0) == false)
@@ -60,7 +60,7 @@ struct LayerPropertyTests {
 
     /// Layer visibility at scale respects zoom rules.
     @Test
-    func `layer visibility at scale respects zoom rules`() throws {
+    func layerVisibilityAtScaleRespectsZoomRules() throws {
         // A style with a layer restricted to scale denominators 1000..100000.
         let xml = """
         <Map srs="epsg:3857">
@@ -92,7 +92,7 @@ struct LayerPropertyTests {
 
     /// Zoom to layer fits the layer envelope.
     @Test
-    func `zoom to layer fits the layer envelope`() throws {
+    func zoomToLayerFitsTheLayerEnvelope() throws {
         let map = try Mapnik(xml: Fixtures.multiLayerStyle)
 
         try map.zoomToLayer(0)

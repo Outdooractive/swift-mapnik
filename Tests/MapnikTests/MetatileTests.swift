@@ -14,7 +14,7 @@ struct MetatileTests {
 
     /// Metatile options validate meta size.
     @Test
-    func `metatile options validate meta size`() throws {
+    func metatileOptionsValidateMetaSize() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
 
         #expect(throws: MapnikError.self) {
@@ -39,16 +39,51 @@ struct MetatileTests {
 
     /// Metatile options compute size.
     @Test
-    func `metatile options compute size`() {
+    func metatileOptionsComputeSize() {
         let options = MetatileOptions(metaSize: 4, render: RenderOptions(width: 256, height: 256, scale: 2.0))
         #expect(options.metatileSize == 2048)
+        #expect(options.metatileWidth == 2048)
+        #expect(options.metatileHeight == 2048)
+    }
+
+    /// Metatile options compute non square size.
+    @Test
+    func metatileOptionsComputeNonSquareSize() {
+        let options = MetatileOptions(metaSize: 2, render: RenderOptions(width: 100, height: 300, scale: 1.0))
+        #expect(options.metatileWidth == 200)
+        #expect(options.metatileHeight == 600)
+    }
+
+    /// Metatile options reject out of range pixel sizes.
+    @Test
+    func metatileOptionsRejectOutOfRangePixelSizes() {
+        let options = MetatileOptions(
+            metaSize: 4,
+            render: RenderOptions(width: 1_000_000, height: 1_000_000, scale: 1e14))
+
+        #expect(throws: MapnikError.self) {
+            try options.validate()
+        }
+    }
+
+    /// Metatile options reject a mismatched meta size.
+    @Test
+    func metatileOptionsRejectAMismatchedMetaSize() throws {
+        let map = try Mapnik(xml: Fixtures.polygonStyle)
+        let block = Metatile(origin: MapTile(x: 8, y: 4, z: 4), metaSize: 2)
+
+        #expect(throws: MapnikError.self) {
+            _ = try map.renderMetatile(
+                block,
+                options: MetatileOptions(metaSize: 4, render: RenderOptions(width: 16, height: 16, format: .png())))
+        }
     }
 
     // MARK: - Rendering
 
     /// Metatile renders raw pixels of expected dimensions.
     @Test
-    func `metatile renders raw pixels of expected dimensions`() throws {
+    func metatileRendersRawPixelsOfExpectedDimensions() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
         let metatile = try map.renderMetatile(
             origin: MapTile(x: 8, y: 4, z: 4),
@@ -67,7 +102,7 @@ struct MetatileTests {
 
     /// Ocean metatile is fully transparent and returns nil.
     @Test
-    func `ocean metatile is fully transparent and returns nil`() throws {
+    func oceanMetatileIsFullyTransparentAndReturnsNil() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
         // South Pacific: tiles 0..1, 12..13 at z4.
         let metatile = try map.renderMetatile(
@@ -79,7 +114,7 @@ struct MetatileTests {
 
     /// Ocean metatile kept when skip disabled.
     @Test
-    func `ocean metatile kept when skip disabled`() throws {
+    func oceanMetatileKeptWhenSkipDisabled() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
         let metatile = try map.renderMetatile(
             origin: MapTile(x: 0, y: 12, z: 4),
@@ -91,7 +126,7 @@ struct MetatileTests {
 
     /// Cropped tiles are valid PNGs.
     @Test
-    func `cropped tiles are valid PNGs`() throws {
+    func croppedTilesAreValidPNGs() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
         let metatile = try #require(try map.renderMetatile(
             origin: MapTile(x: 8, y: 4, z: 4),
@@ -106,26 +141,9 @@ struct MetatileTests {
         #expect(bytes.elementsEqual(Array("RIFF".utf8)))
     }
 
-    /// Cropping ocean tile returns nil with skipping.
-    @Test
-    func `cropping ocean tile returns nil with skipping`() throws {
-        let map = try Mapnik(xml: Fixtures.polygonStyle)
-        // Metatile at x=8, y=4 covers tiles (8..9, 4..5) in Web Mercator:
-        // y=5 is the more southern row (higher y). Germany spans y 4..5 here,
-        // so use the row containing only ocean: y=4 at x=9 is north-east of
-        // Germany (Poland/Scandinavia) — that IS the ocean tile.
-        let metatile = try #require(try map.renderMetatile(
-            origin: MapTile(x: 8, y: 4, z: 4),
-            metaSize: 2,
-            options: RenderOptions(width: 256, height: 256, format: .png())))
-
-        let tile = try metatile.tile(dx: 1, dy: 0)
-        #expect(tile != nil) // Poland is painted (polygon reaches 40E, 70N)
-    }
-
     /// Out of range crop offsets throw.
     @Test
-    func `out of range crop offsets throw`() throws {
+    func outOfRangeCropOffsetsThrow() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
         let metatile = try #require(try map.renderMetatile(
             origin: MapTile(x: 8, y: 4, z: 4),
@@ -142,7 +160,7 @@ struct MetatileTests {
 
     /// Tile at absolute coordinates inside block works.
     @Test
-    func `tile at absolute coordinates inside block works`() throws {
+    func tileAtAbsoluteCoordinatesInsideBlockWorks() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
         let metatile = try #require(try map.renderMetatile(
             origin: MapTile(x: 8, y: 4, z: 4),
@@ -164,7 +182,7 @@ struct MetatileTests {
 
     /// Metatile crops match single tile renders byte for byte.
     @Test
-    func `metatile crops match single tile renders byte for byte`() throws {
+    func metatileCropsMatchSingleTileRendersByteForByte() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
         let origin = MapTile(x: 8, y: 4, z: 4)
         let options = RenderOptions(width: 256, height: 256, format: .png())
@@ -189,7 +207,7 @@ struct MetatileTests {
 
     /// Metatile crops match single tile renders at retina scale.
     @Test
-    func `metatile crops match single tile renders at retina scale`() throws {
+    func metatileCropsMatchSingleTileRendersAtRetinaScale() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
         let origin = MapTile(x: 8, y: 4, z: 4)
         let options = RenderOptions(width: 256, height: 256, scale: 2.0, format: .png())
@@ -210,11 +228,32 @@ struct MetatileTests {
         }
     }
 
+    /// Metatile crops match single tiles for a small integral tile size.
+    @Test
+    func metatileCropsMatchSingleTilesForASmallIntegralTileSize() throws {
+        // Small tiles exercise the stride arithmetic without relying on
+        // 256-pixel defaults.
+        let map = try Mapnik(xml: Fixtures.polygonStyle)
+        let origin = MapTile(x: 8, y: 4, z: 4)
+        let options = RenderOptions(width: 16, height: 16, format: .png())
+
+        let metatile = try #require(try map.renderMetatile(origin: origin, metaSize: 2, options: options))
+
+        for dx in 0 ..< 2 {
+            for dy in 0 ..< 2 {
+                let tile = MapTile(x: origin.x + dx, y: origin.y + dy, z: origin.z)
+                let fromMetatile = try metatile.tile(at: tile)
+                let fromSingle = try map.renderTile(tile, options: options)
+                #expect(fromMetatile == fromSingle, "tile \(tile) differs")
+            }
+        }
+    }
+
     // MARK: - Label placement
 
     /// Labels spanning tile edges are not clipped by metatiling.
     @Test
-    func `labels spanning tile edges are not clipped by metatiling`() throws {
+    func labelsSpanningTileEdgesAreNotClippedByMetatiling() throws {
         // The label fixture places text over the whole Europe polygon; with
         // plain tile rendering a label near an edge can be clipped by the
         // collision detector, while the metatile path places it consistently.
@@ -231,9 +270,75 @@ struct MetatileTests {
         #expect(tile?.prefix(4).elementsEqual([0x89, 0x50, 0x4E, 0x47]) == true)
     }
 
+    /// Metatile cropping ocean tile returns nil with skipping.
+    @Test
+    func metatileCroppingOceanTileReturnsNilWithSkipping() throws {
+        let map = try Mapnik(xml: Fixtures.polygonStyle)
+        // Metatile at x=8, y=4 covers tiles (8..9, 4..5) in Web Mercator.
+        // Tile (9, 4) is north-east of the polygon, over the Atlantic.
+        let metatile = try #require(try map.renderMetatile(
+            origin: MapTile(x: 8, y: 4, z: 4),
+            metaSize: 2,
+            options: RenderOptions(width: 256, height: 256, format: .png())))
+
+        // (1, 0) is painted (the polygon reaches 40E/70N); (0, 0) is ocean.
+        let painted = try metatile.tile(dx: 1, dy: 0)
+        #expect(painted != nil)
+
+        // A fully ocean metatile returns nil.
+        let ocean = try map.renderMetatile(
+            origin: MapTile(x: 0, y: 12, z: 4),
+            metaSize: 2,
+            options: RenderOptions(width: 64, height: 64, format: .png()))
+        #expect(ocean == nil)
+    }
+
+    /// Metatile rejects blocks outside the tile grid.
+    @Test
+    func metatileRejectsBlocksOutsideTheTileGrid() throws {
+        let map = try Mapnik(xml: Fixtures.polygonStyle)
+
+        // Zoom 0 has exactly one tile, so a 2x2 block starting at (0, 0)
+        // extends past the world.
+        #expect(throws: MapnikError.self) {
+            _ = try map.renderMetatile(
+                origin: MapTile(x: 0, y: 0, z: 0),
+                metaSize: 2,
+                options: RenderOptions(width: 32, height: 32, format: .png()))
+        }
+    }
+
+    /// Metatile supports non square tiles.
+    @Test
+    func metatileSupportsNonSquareTiles() throws {
+        let map = try Mapnik(xml: Fixtures.polygonStyle)
+        let metatile = try #require(try map.renderMetatile(
+            origin: MapTile(x: 8, y: 4, z: 4),
+            metaSize: 2,
+            options: RenderOptions(width: 64, height: 128, format: .png())))
+
+        #expect(metatile.width == 128)
+        #expect(metatile.height == 256)
+        #expect(metatile.tileSize == 64)
+        #expect(metatile.tileHeight == 128)
+    }
+
+    /// Metatile exposes raw pixels.
+    @Test
+    func metatileExposesRawPixels() throws {
+        let map = try Mapnik(xml: Fixtures.polygonStyle)
+        let metatile = try #require(try map.renderMetatile(
+            origin: MapTile(x: 8, y: 4, z: 4),
+            metaSize: 2,
+            options: RenderOptions(width: 32, height: 32, format: .png())))
+
+        #expect(metatile.pixels.count == metatile.width * metatile.height * 4)
+        #expect(metatile.pixels == metatile.pixels)
+    }
+
     /// Metatile rendering restores map state.
     @Test
-    func `metatile rendering restores map state`() throws {
+    func metatileRenderingRestoresMapState() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
         let initialSize = map.size
         let initialBuffer = map.bufferSize
@@ -260,7 +365,7 @@ struct MetatileTests {
 
     /// Metatile sequence yields aligned blocks.
     @Test
-    func `metatile sequence yields aligned blocks`() {
+    func metatileSequenceYieldsAlignedBlocks() {
         let sequence = MetatileSequence(
             bounds: Fixtures.germany,
             zoomRange: 9 ... 9,
@@ -283,7 +388,7 @@ struct MetatileTests {
 
     /// Metatile sequence block count.
     @Test
-    func `metatile sequence block count`() {
+    func metatileSequenceBlockCount() {
         // Germany at zoom 9 spans x 264..277, y 161..179 (14 × 19 tiles).
         // With metaSize 2 the aligned grid needs 7 × 10 = 70 blocks.
         let zoom9 = MetatileSequence(bounds: Fixtures.germany, zoomRange: 9 ... 9, metaSize: 2)
@@ -298,7 +403,7 @@ struct MetatileTests {
 
     /// Metatile sequence order follows zoom order.
     @Test
-    func `metatile sequence order follows zoom order`() {
+    func metatileSequenceOrderFollowsZoomOrder() {
         let descending = MetatileSequence(bounds: Fixtures.germany, zoomRange: 12 ... 13, metaSize: 2)
         #expect(descending.zoomLevels == [13, 12])
 
@@ -308,7 +413,7 @@ struct MetatileTests {
 
     /// Metatile sequence tiles stay within bounds.
     @Test
-    func `metatile sequence tiles stay within bounds`() {
+    func metatileSequenceTilesStayWithinBounds() {
         let sequence = MetatileSequence(bounds: Fixtures.germany, zoomRange: 10 ... 11, metaSize: 4)
         let plain = Set(Array(TileSequence(bounds: Fixtures.germany, zoomRange: 10 ... 11)))
         for block in sequence {
@@ -326,7 +431,7 @@ struct MetatileTests {
 
     /// Metatile generator hands out blocks exactly once.
     @Test
-    func `metatile generator hands out blocks exactly once`() {
+    func metatileGeneratorHandsOutBlocksExactlyOnce() {
         let sequence = MetatileSequence(bounds: Fixtures.germany, zoomRange: 10 ... 10, metaSize: 2)
         let generator = MetatileGenerator(sequence)
 
@@ -341,7 +446,7 @@ struct MetatileTests {
 
     /// Bulk rendering through work queue with metatiles.
     @Test
-    func `bulk rendering through work queue with metatiles`() async throws {
+    func bulkRenderingThroughWorkQueueWithMetatiles() async throws {
         let pool = try MapnikPool(
             factory: { try Mapnik(xml: Fixtures.polygonStyle) },
             initialSize: 2,
@@ -391,7 +496,7 @@ struct MetatileTests {
 
     /// Metatile reduces datasource queries versus single tiles.
     @Test
-    func `metatile reduces datasource queries versus single tiles`() throws {
+    func metatileReducesDatasourceQueriesVersusSingleTiles() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
         let origin = MapTile(x: 8, y: 4, z: 4)
         let options = RenderOptions(width: 256, height: 256, format: .png())

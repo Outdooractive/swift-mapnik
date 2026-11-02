@@ -13,7 +13,7 @@ struct TileMathTests {
 
     /// Well known tile coordinates.
     @Test
-    func `well known tile coordinates`() {
+    func wellKnownTileCoordinates() {
         // Berlin, Brandenburger Tor (52.5163 N, 13.3777 E) at zoom 10 is
         // tile (550, 335) in the XYZ scheme.
         let berlin = Coordinate3D(latitude: 52.5163, longitude: 13.3777)
@@ -25,7 +25,7 @@ struct TileMathTests {
 
     /// Zoom zero covers world in one tile.
     @Test
-    func `zoom zero covers world in one tile`() {
+    func zoomZeroCoversWorldInOneTile() {
         let anywhere = Coordinate3D(latitude: 12.3, longitude: -45.6)
         let tile = MapTile(coordinate: anywhere, atZoom: 0)
         #expect(tile.x == 0)
@@ -34,7 +34,7 @@ struct TileMathTests {
 
     /// Western longitudes produce correct tiles.
     @Test
-    func `western longitudes produce correct tiles`() {
+    func westernLongitudesProduceCorrectTiles() {
         // New York (40.7128 N, -74.0060 E) at zoom 6 is tile (18, 24).
         let newYork = Coordinate3D(latitude: 40.7128, longitude: -74.0060)
         let tile = MapTile(coordinate: newYork, atZoom: 6)
@@ -44,7 +44,7 @@ struct TileMathTests {
 
     /// Longitudes just west of prime meridian round down.
     @Test
-    func `longitudes just west of prime meridian round down`() {
+    func longitudesJustWestOfPrimeMeridianRoundDown() {
         // -0.04 degrees at zoom 12 is inside tile 2047; truncation towards
         // zero would produce the same tile as +0.04 degrees (2048), which
         // is wrong.
@@ -57,7 +57,7 @@ struct TileMathTests {
 
     /// Longitudes beyond dateline wrap into range.
     @Test
-    func `longitudes beyond dateline wrap into range`() {
+    func longitudesBeyondDatelineWrapIntoRange() {
         // 185 degrees is east of the dateline and wraps to -175 degrees,
         // which is the first tile of the row.
         let overDateline = Coordinate3D(latitude: 0.0, longitude: 185.0)
@@ -67,7 +67,7 @@ struct TileMathTests {
 
     /// Poles clamped to mercator limit.
     @Test
-    func `poles clamped to mercator limit`() {
+    func polesClampedToMercatorLimit() {
         let northPole = MapTile(coordinate: Coordinate3D(latitude: 90.0, longitude: 0.0), atZoom: 4)
         #expect(northPole.y == 0)
 
@@ -77,7 +77,7 @@ struct TileMathTests {
 
     /// Coordinates in other projections reprojected.
     @Test
-    func `coordinates in other projections reprojected`() {
+    func coordinatesInOtherProjectionsReprojected() {
         // Berlin in Web Mercator.
         let berlinMercator = Coordinate3D(x: 1_489_196.0, y: 6_899_390.0, projection: .epsg3857)
         let tile = MapTile(coordinate: berlinMercator, atZoom: 10)
@@ -87,7 +87,7 @@ struct TileMathTests {
 
     /// Bounding box string parsing accepts valid input.
     @Test
-    func `bounding box string parsing accepts valid input`() {
+    func boundingBoxStringParsingAcceptsValidInput() {
         let box = BoundingBox(parsing: "5.9, 47.2, 15.0, 55.0")
         #expect(box != nil)
         #expect(box?.southWest.longitude == 5.9)
@@ -99,7 +99,7 @@ struct TileMathTests {
 
     /// Bounding box string parsing rejects invalid input.
     @Test
-    func `bounding box string parsing rejects invalid input`() {
+    func boundingBoxStringParsingRejectsInvalidInput() {
         #expect(BoundingBox(parsing: "") == nil)
         #expect(BoundingBox(parsing: "1,2,3") == nil)
         #expect(BoundingBox(parsing: "a,b,c,d") == nil)
@@ -119,7 +119,7 @@ struct TileSequenceTests {
 
     /// Single zoom produces exactly B box tiles.
     @Test
-    func `single zoom produces exactly B box tiles`() {
+    func singleZoomProducesExactlyBBoxTiles() {
         // A small bbox at low zoom: 10.2..10.6 E, 47.2..47.6 N spans 2 tiles
         // per axis at zoom 9.
         let sequence = TileSequence(bounds: bounds, zoomRange: 9 ... 9)
@@ -138,7 +138,7 @@ struct TileSequenceTests {
 
     /// Multiple zoom levels descend by default.
     @Test
-    func `multiple zoom levels descend by default`() {
+    func multipleZoomLevelsDescendByDefault() {
         let sequence = TileSequence(bounds: bounds, zoomRange: 12 ... 13)
         let tiles = Array(sequence)
 
@@ -151,7 +151,7 @@ struct TileSequenceTests {
 
     /// Ascending order visits zoom levels reverse.
     @Test
-    func `ascending order visits zoom levels reverse`() {
+    func ascendingOrderVisitsZoomLevelsReverse() {
         let sequence = TileSequence(bounds: bounds, zoomRange: 12 ... 13, zoomOrder: .ascending)
         let tiles = Array(sequence)
 
@@ -161,7 +161,7 @@ struct TileSequenceTests {
 
     /// Count matches iterated tile count across zooms.
     @Test
-    func `count matches iterated tile count across zooms`() {
+    func countMatchesIteratedTileCountAcrossZooms() {
         for zoomRange in [10 ... 10, 10 ... 12, 0 ... 4, 14 ... 16] {
             let sequence = TileSequence(bounds: bounds, zoomRange: zoomRange)
             #expect(sequence.count == Array(sequence).count)
@@ -170,14 +170,14 @@ struct TileSequenceTests {
 
     /// Worldwide zoom iterates tiles.
     @Test
-    func `worldwide zoom iterates tiles`() {
+    func worldwideZoomIteratesTiles() {
         let sequence = TileSequence(bounds: .world, zoomRange: 0 ... 2)
         #expect(sequence.count == 21)
     }
 
     /// Tile generator hands out same tiles exactly once.
     @Test
-    func `tile generator hands out same tiles exactly once`() {
+    func tileGeneratorHandsOutSameTilesExactlyOnce() {
         let sequence = TileSequence(bounds: bounds, zoomRange: 13 ... 14)
         let generator = TileGenerator(sequence)
 
@@ -190,7 +190,7 @@ struct TileSequenceTests {
 
     /// Iterator returns nil after exhaustion.
     @Test
-    func `iterator returns nil after exhaustion`() {
+    func iteratorReturnsNilAfterExhaustion() {
         var iterator = TileSequence(bounds: bounds, zoomRange: 9 ... 9).makeIterator()
         for _ in 0 ..< 4 {
             #expect(iterator.next() != nil)
@@ -201,7 +201,7 @@ struct TileSequenceTests {
 
     /// Tiles at any zoom within valid bounds.
     @Test
-    func `tiles at any zoom within valid bounds`() {
+    func tilesAtAnyZoomWithinValidBounds() {
         let sequence = TileSequence(bounds: bounds, zoomRange: 0 ... 8)
         for tile in sequence {
             #expect(tile.x >= 0)
@@ -209,6 +209,65 @@ struct TileSequenceTests {
             #expect(tile.x < (1 << tile.z))
             #expect(tile.y < (1 << tile.z))
         }
+    }
+
+    /// Antimeridian crossing bounds produce two ranges.
+    @Test
+    func antimeridianCrossingBoundsProduceTwoRanges() {
+        // 170E ... 170W is a 20 degree strip across the dateline, not the
+        // whole world.
+        let anti = BoundingBox(
+            southWest: Coordinate3D(latitude: -10.0, longitude: 170.0),
+            northEast: Coordinate3D(latitude: 10.0, longitude: -170.0))
+        let sequence = TileSequence(bounds: anti, zoomRange: 4 ... 4)
+
+        let ranges = sequence.tileRanges(atZoom: 4)
+        #expect(ranges.count == 2)
+
+        // The two strips are 1 tile wide each (170E is tile 15, 170W is tile 0
+        // at zoom 4), so 2 tiles per row instead of 16.
+        let tiles = Array(sequence)
+        #expect(tiles.count == 4) // 2 columns x 2 rows
+        #expect(sequence.count == tiles.count)
+        #expect(tiles.allSatisfy { $0.x == 0 || $0.x == 15 })
+    }
+
+    /// Antimeridian crossing bounds are not expanded to the world.
+    @Test
+    func antimeridianCrossingBoundsAreNotExpandedToTheWorld() {
+        let anti = BoundingBox(
+            southWest: Coordinate3D(latitude: -10.0, longitude: 170.0),
+            northEast: Coordinate3D(latitude: 10.0, longitude: -170.0))
+        let sequence = TileSequence(bounds: anti, zoomRange: 4 ... 4)
+
+        // The whole world at zoom 4 would be 256 tiles.
+        #expect(sequence.count < 256)
+        #expect(sequence.count == 4)
+    }
+
+    /// Antimeridian crossing metatile sequence stays narrow.
+    @Test
+    func antimeridianCrossingMetatileSequenceStaysNarrow() {
+        let anti = BoundingBox(
+            southWest: Coordinate3D(latitude: -10.0, longitude: 170.0),
+            northEast: Coordinate3D(latitude: 10.0, longitude: -170.0))
+        let sequence = MetatileSequence(bounds: anti, zoomRange: 4 ... 4, metaSize: 2)
+
+        let tiles = Set(Array(sequence).flatMap(\.tiles))
+        #expect(tiles.count == 4)
+        #expect(tiles.allSatisfy { $0.x == 0 || $0.x == 15 })
+        #expect(sequence.count == Array(sequence).count)
+    }
+
+    /// Metatile origin carries the zoom.
+    @Test
+    func metatileOriginCarriesTheZoom() {
+        let sequence = MetatileSequence(bounds: bounds, zoomRange: 12 ... 12, metaSize: 4)
+        let origin = sequence.metatileOrigin(forX: 265, forY: 162, atZoom: 12)
+
+        #expect(origin.x == 264)
+        #expect(origin.y == 160)
+        #expect(origin.z == 12)
     }
 
 }

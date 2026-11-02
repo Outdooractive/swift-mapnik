@@ -9,7 +9,7 @@ struct TilelistBuilderTests {
 
     /// An empty builder produces an empty tilelist.
     @Test
-    func `empty builder produces empty tilelist`() {
+    func emptyBuilderProducesEmptyTilelist() {
         let builder = TilelistBuilder()
 
         #expect(builder.tileCount == 0)
@@ -18,7 +18,7 @@ struct TilelistBuilderTests {
 
     /// Contiguous tiles collapse into a single range.
     @Test
-    func `contiguous tiles collapse into one range`() {
+    func contiguousTilesCollapseIntoOneRange() {
         let builder = TilelistBuilder()
         builder.add((5722 ... 5730).map { MapTile(x: $0, y: 8656, z: 14) })
 
@@ -28,7 +28,7 @@ struct TilelistBuilderTests {
 
     /// Gaps produce separate ranges.
     @Test
-    func `gaps produce separate ranges`() {
+    func gapsProduceSeparateRanges() {
         let builder = TilelistBuilder()
         builder.add([MapTile(x: 1, y: 2, z: 3), MapTile(x: 2, y: 2, z: 3)])
         builder.add([MapTile(x: 5, y: 2, z: 3)])
@@ -38,7 +38,7 @@ struct TilelistBuilderTests {
 
     /// A single tile produces a one-element range.
     @Test
-    func `single tile produces single range`() {
+    func singleTileProducesSingleRange() {
         let builder = TilelistBuilder()
         builder.add(MapTile(x: 7, y: 9, z: 10))
 
@@ -47,7 +47,7 @@ struct TilelistBuilderTests {
 
     /// Tiles are grouped by zoom level and row.
     @Test
-    func `tiles are grouped by zoom and row`() {
+    func tilesAreGroupedByZoomAndRow() {
         let builder = TilelistBuilder()
         builder.add(MapTile(x: 1, y: 1, z: 1))
         builder.add(MapTile(x: 1, y: 2, z: 1))
@@ -61,7 +61,7 @@ struct TilelistBuilderTests {
 
     /// Duplicate tiles collapse to one range.
     @Test
-    func `duplicate tiles collapse`() {
+    func duplicateTilesCollapse() {
         let builder = TilelistBuilder()
         builder.add(MapTile(x: 1, y: 2, z: 3))
         builder.add(MapTile(x: 1, y: 2, z: 3))
@@ -72,7 +72,7 @@ struct TilelistBuilderTests {
 
     /// The tilelist encodes to the documented JSON shape.
     @Test
-    func `tilelist encodes to documented shape`() throws {
+    func tilelistEncodesToDocumentedShape() throws {
         let builder = TilelistBuilder()
         builder.add((5722 ... 5730).map { MapTile(x: $0, y: 8656, z: 14) })
 
@@ -87,7 +87,7 @@ struct TilelistBuilderTests {
 
     /// The tilelist round-trips through Codable.
     @Test
-    func `tilelist round trips through codable`() throws {
+    func tilelistRoundTripsThroughCodable() throws {
         let builder = TilelistBuilder()
         builder.add([MapTile(x: 1, y: 2, z: 3), MapTile(x: 4, y: 5, z: 6)])
 
@@ -99,7 +99,7 @@ struct TilelistBuilderTests {
 
     /// Concurrent adds are safe and lossless.
     @Test
-    func `concurrent adds are safe`() async {
+    func concurrentAddsAreSafe() async {
         let builder = TilelistBuilder()
 
         await withTaskGroup(of: Void.self) { group in
