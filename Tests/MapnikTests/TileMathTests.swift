@@ -194,4 +194,59 @@ struct TileSequenceTests {
         }
     }
 
+    @Test
+    func `antimeridian crossing bounds produce two ranges`() {
+        // 170E ... 170W is a 20 degree strip across the dateline, not the
+        // whole world.
+        let anti = BoundingBox(
+            southWest: Coordinate3D(latitude: -10.0, longitude: 170.0),
+            northEast: Coordinate3D(latitude: 10.0, longitude: -170.0))
+        let sequence = TileSequence(bounds: anti, zoomRange: 4 ... 4)
+
+        let ranges = sequence.tileRanges(atZoom: 4)
+        #expect(ranges.count == 2)
+
+        // The two strips are 1 tile wide each (170E is tile 15, 170W is tile 0
+        // at zoom 4), so 2 tiles per row instead of 16.
+        let tiles = Array(sequence)
+        #expect(tiles.count == 4) // 2 columns x 2 rows
+        #expect(sequence.count == tiles.count)
+        #expect(tiles.allSatisfy { $0.x == 0 || $0.x == 15 })
+    }
+
+    @Test
+    func `antimeridian crossing bounds are not expanded to the world`() {
+        let anti = BoundingBox(
+            southWest: Coordinate3D(latitude: -10.0, longitude: 170.0),
+            northEast: Coordinate3D(latitude: 10.0, longitude: -170.0))
+        let sequence = TileSequence(bounds: anti, zoomRange: 4 ... 4)
+
+        // The whole world at zoom 4 would be 256 tiles.
+        #expect(sequence.count < 256)
+        #expect(sequence.count == 4)
+    }
+
+    @Test
+    func `antimeridian crossing metatile sequence stays narrow`() {
+        let anti = BoundingBox(
+            southWest: Coordinate3D(latitude: -10.0, longitude: 170.0),
+            northEast: Coordinate3D(latitude: 10.0, longitude: -170.0))
+        let sequence = MetatileSequence(bounds: anti, zoomRange: 4 ... 4, metaSize: 2)
+
+        let tiles = Set(Array(sequence).flatMap(\.tiles))
+        #expect(tiles.count == 4)
+        #expect(tiles.allSatisfy { $0.x == 0 || $0.x == 15 })
+        #expect(sequence.count == Array(sequence).count)
+    }
+
+    @Test
+    func `metatile origin carries the zoom`() {
+        let sequence = MetatileSequence(bounds: bounds, zoomRange: 12 ... 12, metaSize: 4)
+        let origin = sequence.metatileOrigin(forX: 265, forY: 162, atZoom: 12)
+
+        #expect(origin.x == 264)
+        #expect(origin.y == 160)
+        #expect(origin.z == 12)
+    }
+
 }
