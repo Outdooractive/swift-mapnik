@@ -92,24 +92,27 @@ struct MapnikConfigInitializationTests {
 
     // MARK: - Parent tests
 
+    /// Initialize with a nonexistent plugin path throws.
     @Test(.enabled(if: MapnikConfigInitializationTests.activeScenario == nil))
-    func `initialize with a nonexistent plugin path throws`() throws {
+    func initializeWithANonexistentPluginPathThrows() throws {
         let output = try runInChildProcess(scenario: "nonexistent", testName: "scenario nonexistent")
         guard let output else { return }
 
         #expect(output.contains("plugin path is not a directory"))
     }
 
+    /// A failed initialization does not poison later default initialization.
     @Test(.enabled(if: MapnikConfigInitializationTests.activeScenario == nil))
-    func `a failed initialization does not poison later default initialization`() throws {
+    func aFailedInitializationDoesNotPoisonLaterDefaultInitialization() throws {
         let output = try runInChildProcess(scenario: "retryAfterFailure", testName: "scenario retry after failure")
         guard let output else { return }
 
         #expect(output.contains("retry-after-failure: ok"))
     }
 
+    /// Initialize with different paths after success throws.
     @Test(.enabled(if: MapnikConfigInitializationTests.activeScenario == nil))
-    func `initialize with different paths after success throws`() throws {
+    func initializeWithDifferentPathsAfterSuccessThrows() throws {
         let output = try runInChildProcess(scenario: "differentPaths", testName: "scenario different paths")
         guard let output else { return }
 
@@ -118,8 +121,9 @@ struct MapnikConfigInitializationTests {
 
     // MARK: - Child scenarios
 
+    /// Scenario nonexistent.
     @Test(.enabled(if: MapnikConfigInitializationTests.activeScenario == "nonexistent"))
-    func `scenario nonexistent`() {
+    func scenarioNonexistent() {
         do {
             try MapnikConfig.initialize(plugins: "/nonexistent/input", fonts: "/nonexistent/fonts")
             print("scenario-nonexistent: unexpected-success")
@@ -129,8 +133,9 @@ struct MapnikConfigInitializationTests {
         }
     }
 
+    /// Scenario retry after failure.
     @Test(.enabled(if: MapnikConfigInitializationTests.activeScenario == "retryAfterFailure"))
-    func `scenario retry after failure`() {
+    func scenarioRetryAfterFailure() {
         do {
             try MapnikConfig.initialize(plugins: "/nonexistent/input", fonts: "/nonexistent/fonts")
             print("retry-after-failure: unexpected-success")
@@ -150,8 +155,9 @@ struct MapnikConfigInitializationTests {
         }
     }
 
+    /// Scenario different paths.
     @Test(.enabled(if: MapnikConfigInitializationTests.activeScenario == "differentPaths"))
-    func `scenario different paths`() {
+    func scenarioDifferentPaths() {
         do {
             _ = try Mapnik(xml: Fixtures.polygonStyle)
         }
@@ -177,7 +183,7 @@ struct TestExecutableResolutionTests {
 
     /// A plain executable path is used as-is (the Linux layout).
     @Test
-    func `plain executable is used directly`() {
+    func plainExecutableIsUsedDirectly() {
         let executable = URL(fileURLWithPath: CommandLine.arguments[0])
         let resolved = MapnikConfigInitializationTests.testExecutableURL(for: executable)
         #expect(resolved?.path == executable.path)
@@ -185,7 +191,7 @@ struct TestExecutableResolutionTests {
 
     /// A bundle directory resolves to Contents/MacOS/<name> (the macOS layout).
     @Test
-    func `bundle directory resolves to its executable`() throws {
+    func bundleDirectoryResolvesToItsExecutable() throws {
         let root = FileManager.default
             .temporaryDirectory
             .appending(path: "mapnik-bundle-\(UUID().uuidString)")
@@ -207,7 +213,7 @@ struct TestExecutableResolutionTests {
 
     /// A bundle without an executable resolves to nil instead of crashing.
     @Test
-    func `empty bundle resolves to nil`() throws {
+    func emptyBundleResolvesToNil() throws {
         let root = FileManager.default
             .temporaryDirectory
             .appending(path: "mapnik-bundle-\(UUID().uuidString)")

@@ -173,7 +173,8 @@ public final class Mapnik: @unchecked Sendable {
     ///   - x: Tile column at zoom `z`, 0 ..< 2^z.
     ///   - y: Tile row at zoom `z`, 0 ..< 2^z, counting from the north.
     ///   - z: Zoom level, 0...30.
-    ///   - format: Output format. Defaults to lossless-ish WebP.
+    ///   - format: Output format. Defaults to mapnik's default WebP encoding
+    ///     (lossy, quality 80); pass `.webp(quality:lossless:)` for control.
     ///   - size: Tile size in pixels. Defaults to 256; `512` is common for
     ///     MapLibre/Mapbox GL style tiles.
     ///   - scale: Scale factor, `2.0` for @2x tiles.
@@ -347,9 +348,10 @@ public final class Mapnik: @unchecked Sendable {
     /// Like `renderTile`, the block is always rendered in Web Mercator XYZ
     /// geometry regardless of the map's `srs`. The render options' buffer
     /// (padding) applies around the whole block, not per tile — with the
-    /// default `bufferSize` of 16 on a 4 × 4 metatile of 256-pixel tiles this
-    /// gives proportionally less per-tile padding than a plain tile render;
-    /// raise `bufferSize` if edge padding matters for your style.
+    /// stylesheet's buffer (16 in the test fixture) on a 4 × 4 metatile of
+    /// 256-pixel tiles this gives proportionally less per-tile padding than a
+    /// plain tile render; raise `bufferSize` if edge padding matters for your
+    /// style.
     ///
     /// - Parameters:
     ///   - origin: The block's top-left (north-west) tile.

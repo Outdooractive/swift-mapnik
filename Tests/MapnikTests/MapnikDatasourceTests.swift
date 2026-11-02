@@ -6,8 +6,9 @@ import Testing
 @Suite("MapnikDatasource")
 struct MapnikDatasourceTests {
 
+    /// Geojson datasource reports fields geometry and extent.
     @Test
-    func `geojson datasource reports fields geometry and extent`() throws {
+    func geojsonDatasourceReportsFieldsGeometryAndExtent() throws {
         let datasource = try MapnikDatasource(parameters: [
             ("type", "geojson"),
             ("inline", Fixtures.geojsonMultiAttribute),
@@ -40,8 +41,9 @@ struct MapnikDatasourceTests {
         #expect(info.featureError == nil)
     }
 
+    /// Raster datasources report no features or geometry.
     @Test
-    func `raster datasources report no features or geometry`() throws {
+    func rasterDatasourcesReportNoFeaturesOrGeometry() throws {
         // A 2x2 GeoTIFF built from raw bytes (little-endian, uint8 bands).
         // The gdal plugin reads it; type detection alone is what matters.
         let tiff = Fixtures.tinyTiff
@@ -63,8 +65,9 @@ struct MapnikDatasourceTests {
         #expect(info.features.isEmpty)
     }
 
+    /// Feature iteration errors do not discard fields.
     @Test
-    func `feature iteration errors do not discard fields`() throws {
+    func featureIterationErrorsDoNotDiscardFields() throws {
         // A GeoJSON datasource whose file disappears after creation —
         // mapnik parses lazily, so creation succeeds but the featureset
         // iteration throws.
@@ -84,8 +87,9 @@ struct MapnikDatasourceTests {
         #expect(info.fields.isEmpty == false || info.featureError != nil)
     }
 
+    /// Missing plugin throws with mapnik message.
     @Test
-    func `missing plugin throws with mapnik message`() throws {
+    func missingPluginThrowsWithMapnikMessage() throws {
         do {
             let datasource = try MapnikDatasource(parameters: [
                 ("type", "does-not-exist"),
@@ -99,8 +103,9 @@ struct MapnikDatasourceTests {
         }
     }
 
+    /// Empty parameters rejected.
     @Test
-    func `empty parameters rejected`() {
+    func emptyParametersRejected() {
         #expect(throws: (any Error).self) {
             _ = try MapnikDatasource(parameters: [])
         }
@@ -108,8 +113,9 @@ struct MapnikDatasourceTests {
 
     // MARK: - Inspection improvements
 
+    /// Field filter narrows the field list and samples.
     @Test
-    func `field filter narrows the field list and samples`() throws {
+    func fieldFilterNarrowsTheFieldListAndSamples() throws {
         let datasource = try MapnikDatasource(parameters: [
             ("type", "geojson"),
             ("inline", Fixtures.geojsonMultiAttribute),
@@ -143,8 +149,9 @@ struct MapnikDatasourceTests {
         #expect(none.features.first?.isEmpty == true)
     }
 
+    /// Typed attribute values survive inspection.
     @Test
-    func `typed attribute values survive inspection`() throws {
+    func typedAttributeValuesSurviveInspection() throws {
         let datasource = try MapnikDatasource(parameters: [
             ("type", "geojson"),
             ("inline", Fixtures.geojsonMultiAttribute),

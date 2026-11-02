@@ -33,10 +33,21 @@ public struct TileSequence: Sequence, Sendable {
 
     }
 
+    /// The bounding box the tiles cover, in WGS 84 degrees.
     public let bounds: BoundingBox
+
+    /// The zoom levels to visit, 0...30.
     public let zoomRange: ClosedRange<Int>
+
+    /// The order in which zoom levels are visited.
     public let zoomOrder: ZoomOrder
 
+    /// Creates a tile sequence.
+    ///
+    /// - Parameters:
+    ///   - bounds: The area to cover, in WGS 84 degrees.
+    ///   - zoomRange: The zoom levels to visit, 0...30.
+    ///   - zoomOrder: The order in which zoom levels are visited.
     public init(
         bounds: BoundingBox,
         zoomRange: ClosedRange<Int>,
@@ -50,6 +61,7 @@ public struct TileSequence: Sequence, Sendable {
         self.zoomOrder = zoomOrder
     }
 
+    /// Returns an iterator over the tiles.
     public func makeIterator() -> Iterator {
         Iterator(self)
     }
@@ -137,6 +149,7 @@ public struct TileSequence: Sequence, Sendable {
             self.currentY = ranges[0].min.y
         }
 
+        /// Returns the next tile, or `nil` when the sequence is exhausted.
         public mutating func next() -> MapTile? {
             if isFinished {
                 return nil
@@ -206,6 +219,7 @@ public final class TileGenerator: @unchecked Sendable {
     private let lock = NSLock()
     private var iterator: TileSequence.Iterator
 
+    /// Creates a generator for `sequence`.
     public init(_ sequence: TileSequence) {
         self.sequence = sequence
         self.iterator = sequence.makeIterator()
@@ -254,10 +268,23 @@ public struct MetatileSequence: Sequence, Sendable {
 
     /// Number of tiles per metatile edge, 1...16.
     public let metaSize: Int
+
+    /// The bounding box the blocks cover, in WGS 84 degrees.
     public let bounds: BoundingBox
+
+    /// The zoom levels to visit, 0...30.
     public let zoomRange: ClosedRange<Int>
+
+    /// The order in which zoom levels are visited.
     public let zoomOrder: TileSequence.ZoomOrder
 
+    /// Creates a metatile sequence.
+    ///
+    /// - Parameters:
+    ///   - bounds: The area to cover, in WGS 84 degrees.
+    ///   - zoomRange: The zoom levels to visit, 0...30.
+    ///   - metaSize: Tiles per metatile edge, 1...16.
+    ///   - zoomOrder: The order in which zoom levels are visited.
     public init(
         bounds: BoundingBox,
         zoomRange: ClosedRange<Int>,
@@ -275,6 +302,7 @@ public struct MetatileSequence: Sequence, Sendable {
         self.zoomOrder = zoomOrder
     }
 
+    /// Returns an iterator over the tiles.
     public func makeIterator() -> Iterator {
         Iterator(self)
     }
@@ -490,6 +518,7 @@ public final class MetatileGenerator: @unchecked Sendable {
     private var iterator: MetatileSequence.Iterator
     private let sequence: MetatileSequence
 
+    /// Creates a generator for `sequence`.
     public init(_ sequence: MetatileSequence) {
         self.sequence = sequence
         self.iterator = sequence.makeIterator()

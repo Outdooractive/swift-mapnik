@@ -7,8 +7,9 @@ import Testing
 @Suite("Save XML")
 struct SaveXMLTests {
 
+    /// SaveXML produces a loadable Mapnik document.
     @Test
-    func `saveXML produces a loadable Mapnik document`() throws {
+    func saveXMLProducesALoadableMapnikDocument() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
         let xml = try map.saveXML()
 
@@ -26,8 +27,9 @@ struct SaveXMLTests {
         #expect(original?.count == roundTrip?.count)
     }
 
+    /// SaveXML round trips runtime modifications.
     @Test
-    func `saveXML round trips runtime modifications`() throws {
+    func saveXMLRoundTripsRuntimeModifications() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
 
         // Runtime modifications: SRS and buffer. (Layer visibility does not
@@ -43,8 +45,9 @@ struct SaveXMLTests {
         #expect(reloaded.layerVisible(0) == true)
     }
 
+    /// SaveXML omits hidden layers like mapnik.
     @Test
-    func `saveXML omits hidden layers like mapnik`() throws {
+    func saveXMLOmitsHiddenLayersLikeMapnik() throws {
         let map = try Mapnik(xml: Fixtures.multiLayerStyle)
         map.setLayerVisible(0, visible: false)
 
@@ -54,8 +57,9 @@ struct SaveXMLTests {
         #expect(reloaded.layerNames == ["layer-two"])
     }
 
+    /// SaveXML writes to a file.
     @Test
-    func `saveXML writes to a file`() throws {
+    func saveXMLWritesToAFile() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
         let url = FileManager.default
             .temporaryDirectory
@@ -73,8 +77,9 @@ struct SaveXMLTests {
         #expect(data != nil)
     }
 
+    /// SaveXML explicit defaults is rejected on affected mapnik versions.
     @Test
-    func `saveXML explicit defaults is rejected on affected mapnik versions`() throws {
+    func saveXMLExplicitDefaultsIsRejectedOnAffectedMapnikVersions() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
 
         // mapnik 4.0...4.2 corrupts memory when serializing with explicit

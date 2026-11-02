@@ -10,8 +10,9 @@ import Testing
 @Suite("Plugin discovery")
 struct PluginDiscoveryTests {
 
+    /// Version components split dotted versions.
     @Test
-    func `version components split dotted versions`() {
+    func versionComponentsSplitDottedVersions() {
         #expect(MapnikConfig.versionComponents("/usr/lib/mapnik/4.2/input") == [4, 2])
         #expect(MapnikConfig.versionComponents("/usr/lib/mapnik/3.1/input") == [3, 1])
         #expect(MapnikConfig.versionComponents("/usr/lib/mapnik/4.10/input") == [4, 10])
@@ -20,16 +21,18 @@ struct PluginDiscoveryTests {
             "/usr/lib/aarch64-linux-gnu/mapnik/4.2/input") == [4, 2])
     }
 
+    /// Version components are empty without a version.
     @Test
-    func `version components are empty without a version`() {
+    func versionComponentsAreEmptyWithoutAVersion() {
         #expect(MapnikConfig.versionComponents("/usr/lib/mapnik/input") == [])
         #expect(MapnikConfig.versionComponents("/usr/lib/mapnik/foo/input") == [])
         #expect(MapnikConfig.versionComponents("input") == [])
         #expect(MapnikConfig.versionComponents("") == [])
     }
 
+    /// Versions compare numerically not lexicographically.
     @Test
-    func `versions compare numerically not lexicographically`() {
+    func versionsCompareNumericallyNotLexicographically() {
         // 4.10 is newer than 4.2, although "4.10" < "4.2" lexicographically.
         #expect(MapnikConfig.compareVersionedPaths(
             "/usr/lib/mapnik/4.10/input",
@@ -41,8 +44,9 @@ struct PluginDiscoveryTests {
             "/usr/lib/mapnik/3.1/input") == .orderedDescending)
     }
 
+    /// Versions compare across majors and minors.
     @Test
-    func `versions compare across majors and minors`() {
+    func versionsCompareAcrossMajorsAndMinors() {
         #expect(MapnikConfig.compareVersionedPaths(
             "/usr/lib/mapnik/4.2/input",
             "/usr/lib/mapnik/3.1/input") == .orderedDescending)
@@ -54,8 +58,9 @@ struct PluginDiscoveryTests {
             "/usr/lib/mapnik/4.2/input") == .orderedSame)
     }
 
+    /// Versioned paths beat unversioned ones.
     @Test
-    func `versioned paths beat unversioned ones`() {
+    func versionedPathsBeatUnversionedOnes() {
         #expect(MapnikConfig.compareVersionedPaths(
             "/usr/lib/mapnik/4.2/input",
             "/usr/lib/mapnik/input") == .orderedDescending)
@@ -64,8 +69,9 @@ struct PluginDiscoveryTests {
             "/usr/lib/mapnik/4.2/input") == .orderedAscending)
     }
 
+    /// Highest versioned directory picks the newest.
     @Test
-    func `highest versioned directory picks the newest`() throws {
+    func highestVersionedDirectoryPicksTheNewest() throws {
         let root = FileManager.default
             .temporaryDirectory
             .appending(path: "mapnik-plugins-\(UUID().uuidString)")
@@ -86,14 +92,16 @@ struct PluginDiscoveryTests {
         #expect(resolved?.hasSuffix("/4.10/input") == true)
     }
 
+    /// Default plugin path is a directory containing plugins.
     @Test
-    func `default plugin path is a directory containing plugins`() throws {
+    func defaultPluginPathIsADirectoryContainingPlugins() throws {
         let path = try #require(MapnikConfig.defaultPluginPath)
         #expect(FileManager.default.fileExists(atPath: path))
     }
 
+    /// Default font path exists.
     @Test
-    func `default font path exists`() throws {
+    func defaultFontPathExists() throws {
         let path = try #require(MapnikConfig.defaultFontPath)
         #expect(FileManager.default.fileExists(atPath: path))
     }
