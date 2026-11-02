@@ -839,8 +839,8 @@ public final class Mapnik: @unchecked Sendable {
 
     /// Sets the buffer (padding) in pixels used for subsequent renders.
     ///
-    /// Negative values are clamped to 0, matching
-    /// ``RenderOptions/validate()`` which rejects them.
+    /// Negative values are clamped to 0; the render entry points reject a
+    /// negative `RenderOptions.bufferSize` instead.
     public func setBufferSize(_ pixels: Int) {
         mapnik_map_set_buffer_size(map, Int32(clamping: max(0, pixels)))
     }
