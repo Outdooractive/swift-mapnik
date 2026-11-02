@@ -55,6 +55,7 @@
 #include <exception>
 #include <algorithm>
 #include <atomic>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <memory>
@@ -63,6 +64,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
 
@@ -113,6 +115,31 @@ public:
     mutable std::atomic<int> query_count{0};
     mutable std::atomic<int> point_query_count{0};
 };
+
+/// True when `path` names an existing directory.
+bool is_directory(std::string const& path) {
+    struct stat info;
+    if (::stat(path.c_str(), &info) != 0) {
+        return false;
+    }
+    return S_ISDIR(info.st_mode);
+}
+
+/// True when `path` (or a subdirectory) contains at least one `.input` plugin.
+bool has_plugin_files(std::string const& path) {
+    namespace fs = std::filesystem;
+    std::error_code error;
+    for (fs::recursive_directory_iterator it(path, error), end; it != end; it.increment(error)) {
+        if (error) {
+            return false;
+        }
+        std::string const& name = it->path().filename().string();
+        if (name.size() > 6 && name.compare(name.size() - 6, 6, ".input") == 0) {
+            return true;
+        }
+    }
+    return false;
+}
 
 /// Serializes map/datasource creation and stylesheet loading. Mapnik's
 /// datasource and font registries are global mutable state and not
@@ -625,11 +652,28 @@ bool mapnik_init(const char* input_plugins_path,
                  char** error_out) {
     try {
         if (input_plugins_path != nullptr && *input_plugins_path != '\0') {
-            mapnik::datasource_cache::instance().register_datasources(
-                std::string(input_plugins_path), true /* recursive */);
+            std::string const path(input_plugins_path);
+            if (!is_directory(path)) {
+                return report_error(error_out,
+                                    "plugin path is not a directory: '" + path + "'");
+            }
+            mapnik::datasource_cache::instance().register_datasources(path, true /* recursive */);
+            if (!has_plugin_files(path)) {
+                return report_error(error_out,
+                                    "no mapnik input plugins (*.input) found in '" + path + "'");
+            }
         }
         if (fonts_path != nullptr && *fonts_path != '\0') {
-            mapnik::freetype_engine::register_fonts(std::string(fonts_path), true /* recursive */);
+            std::string const path(fonts_path);
+            if (!is_directory(path)) {
+                return report_error(error_out,
+                                    "font path is not a directory: '" + path + "'");
+            }
+            // register_fonts returns false when nothing was registered.
+            if (!mapnik::freetype_engine::register_fonts(path, true /* recursive */)) {
+                return report_error(error_out,
+                                    "no usable fonts found in '" + path + "'");
+            }
         }
         return true;
     }
