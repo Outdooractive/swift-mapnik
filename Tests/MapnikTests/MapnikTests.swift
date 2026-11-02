@@ -258,8 +258,10 @@ struct MapnikTests {
 
         let data = try map.render(width: 512, height: 256, format: .png())
         #expect(data != nil)
-        #expect(map.size.width == 512)
-        #expect(map.size.height == 256)
+
+        // Free-form renders restore the map's size, so repeated renders stay
+        // independent of each other.
+        #expect(map.size == initial)
     }
 
     @Test
@@ -332,7 +334,7 @@ struct MapnikTests {
 
         #expect(first != nil)
         #expect(second != nil)
-        #expect(first?.count == second!.count)
+        #expect(try first?.count == #require(second?.count))
     }
 
     @Test

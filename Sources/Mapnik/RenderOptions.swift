@@ -23,8 +23,10 @@ public enum ImageFormat: Sendable, Hashable {
     /// options; use `Mapnik.renderSVG(...)` instead of the pixel formats.
     case svg
 
-    /// The mapnik image type string for this format.
-    var typeString: String {
+    /// The mapnik image type string for this format (e.g. `"webp:quality=80"`).
+    ///
+    /// Exposed so callers can log or forward the exact string mapnik receives.
+    public var typeString: String {
         switch self {
         case .png(nil):
             return "png"

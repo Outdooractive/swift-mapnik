@@ -444,36 +444,27 @@ public final class Mapnik: @unchecked Sendable {
 
     /// Renders the current map view with the given options.
     public func render(_ options: RenderOptions) throws -> Data? {
-        try options.validate()
+        try withRenderState(options, resize: true) {
+            var data: UnsafeMutablePointer<UInt8>? = nil
+            var size: CUnsignedLong = 0
+            var isEmpty = false
 
-        mapnik_map_resize(map, Int32(clamping: options.width), Int32(clamping: options.height))
-        let previousBuffer = applyBuffer(options.bufferSize)
-        defer {
-            if let previousBuffer {
-                setBufferSize(previousBuffer)
+            try CErrors.withError(MapnikError.renderingFailed) { errorOut in
+                mapnik_map_render_to_buffer(
+                    map,
+                    options.format.typeString,
+                    options.skipFullyTransparent,
+                    &data,
+                    &size,
+                    &isEmpty,
+                    errorOut)
             }
-        }
-        zoomAllIfUnset()
 
-        var data: UnsafeMutablePointer<UInt8>? = nil
-        var size: CUnsignedLong = 0
-        var isEmpty = false
-
-        try CErrors.withError(MapnikError.renderingFailed) { errorOut in
-            mapnik_map_render_to_buffer(
-                map,
-                options.format.typeString,
-                options.skipFullyTransparent,
-                &data,
-                &size,
-                &isEmpty,
-                errorOut)
+            if isEmpty || data == nil || size == 0 {
+                return nil
+            }
+            return dataBuffer(data, size: Int(size))
         }
-
-        if isEmpty || data == nil || size == 0 {
-            return nil
-        }
-        return dataBuffer(data, size: Int(size))
     }
 
     /// Renders a geographic bounding box (WGS 84 degrees) into an image.
@@ -545,13 +536,19 @@ public final class Mapnik: @unchecked Sendable {
     /// Vector output goes through mapnik's cairo backend and produces vector
     /// output for the layers that support it. If the map has no extent yet,
     /// it first zooms to the layer extent.
-    public func renderSVG(scale: Double = 1.0) throws -> Data {
-        try renderCairoSurface(.svg, scale: scale)
+    ///
+    /// - Parameters:
+    ///   - width: Page width in pixels; `nil` uses the map's current width.
+    ///   - height: Page height in pixels; `nil` uses the map's current height.
+    ///   - scale: Scale factor for symbolizer sizes.
+    /// - Returns: The SVG document bytes.
+    public func renderSVG(width: Int? = nil, height: Int? = nil, scale: Double = 1.0) throws -> Data {
+        try renderCairoSurface(.svg, width: width, height: height, scale: scale)
     }
 
     /// Renders the current map view as an SVG file.
-    public func renderSVG(to url: URL, scale: Double = 1.0) throws {
-        try renderCairoSurface(.svg, scale: scale, to: url)
+    public func renderSVG(to url: URL, width: Int? = nil, height: Int? = nil, scale: Double = 1.0) throws {
+        try renderCairoSurface(.svg, width: width, height: height, scale: scale, to: url)
     }
 
     /// Renders the current map view as a PDF document.
@@ -564,34 +561,51 @@ public final class Mapnik: @unchecked Sendable {
     ///   twice-size labels and line widths).
     /// - Returns: The PDF document bytes.
     /// - Throws: `MapnikError.renderingFailed` when rendering failed.
-    public func renderPDF(scale: Double = 1.0) throws -> Data {
-        try renderCairoSurface(.pdf, scale: scale)
+    public func renderPDF(width: Int? = nil, height: Int? = nil, scale: Double = 1.0) throws -> Data {
+        try renderCairoSurface(.pdf, width: width, height: height, scale: scale)
     }
 
     /// Renders the current map view as a PDF file.
-    public func renderPDF(to url: URL, scale: Double = 1.0) throws {
-        try renderCairoSurface(.pdf, scale: scale, to: url)
+    public func renderPDF(to url: URL, width: Int? = nil, height: Int? = nil, scale: Double = 1.0) throws {
+        try renderCairoSurface(.pdf, width: width, height: height, scale: scale, to: url)
     }
 
     /// Renders the current map view as a PostScript document.
     ///
     /// Like `renderPDF`, but emitting PostScript (`.ps`) output.
-    public func renderPostScript(scale: Double = 1.0) throws -> Data {
-        try renderCairoSurface(.postScript, scale: scale)
+    public func renderPostScript(width: Int? = nil, height: Int? = nil, scale: Double = 1.0) throws -> Data {
+        try renderCairoSurface(.postScript, width: width, height: height, scale: scale)
     }
 
     /// Renders the current map view as a PostScript file.
-    public func renderPostScript(to url: URL, scale: Double = 1.0) throws {
-        try renderCairoSurface(.postScript, scale: scale, to: url)
+    public func renderPostScript(to url: URL, width: Int? = nil, height: Int? = nil, scale: Double = 1.0) throws {
+        try renderCairoSurface(.postScript, width: width, height: height, scale: scale, to: url)
     }
 
     // MARK: - Private (cairo)
 
     /// Renders a cairo vector surface into memory (via a temporary file,
     /// since mapnik exposes no to-buffer variant).
-    private func renderCairoSurface(_ surface: CairoSurfaceType, scale: Double) throws -> Data {
+    private func renderCairoSurface(
+        _ surface: CairoSurfaceType,
+        width: Int?,
+        height: Int?,
+        scale: Double,
+    ) throws -> Data {
         guard scale > 0, scale.isFinite else {
             throw MapnikError.invalidInput("scale must be positive and finite, got \(scale)")
+        }
+
+        let previousSize = size
+        let targetSize = (width ?? previousSize.width, height ?? previousSize.height)
+        guard targetSize.0 > 0, targetSize.1 > 0 else {
+            throw MapnikError.invalidInput(
+                "width and height must be positive, got \(targetSize.0)x\(targetSize.1)")
+        }
+
+        mapnik_map_resize(map, Int32(clamping: targetSize.0), Int32(clamping: targetSize.1))
+        defer {
+            mapnik_map_resize(map, Int32(clamping: previousSize.width), Int32(clamping: previousSize.height))
         }
 
         zoomAllIfUnset()
@@ -611,9 +625,27 @@ public final class Mapnik: @unchecked Sendable {
     }
 
     /// Renders a cairo vector surface to a file.
-    private func renderCairoSurface(_ surface: CairoSurfaceType, scale: Double, to url: URL) throws {
+    private func renderCairoSurface(
+        _ surface: CairoSurfaceType,
+        width: Int?,
+        height: Int?,
+        scale: Double,
+        to url: URL,
+    ) throws {
         guard scale > 0, scale.isFinite else {
             throw MapnikError.invalidInput("scale must be positive and finite, got \(scale)")
+        }
+
+        let previousSize = size
+        let targetSize = (width ?? previousSize.width, height ?? previousSize.height)
+        guard targetSize.0 > 0, targetSize.1 > 0 else {
+            throw MapnikError.invalidInput(
+                "width and height must be positive, got \(targetSize.0)x\(targetSize.1)")
+        }
+
+        mapnik_map_resize(map, Int32(clamping: targetSize.0), Int32(clamping: targetSize.1))
+        defer {
+            mapnik_map_resize(map, Int32(clamping: previousSize.width), Int32(clamping: previousSize.height))
         }
 
         zoomAllIfUnset()
@@ -985,6 +1017,54 @@ public final class Mapnik: @unchecked Sendable {
         if (minX < maxX) == false || (minY < maxY) == false {
             try? zoomAll()
         }
+    }
+
+    /// Runs `body` with a temporary map size and buffer override, restoring
+    /// both afterwards.
+    ///
+    /// Every render entry point needs the same prologue (validate, optionally
+    /// resize, apply the buffer, zoom if unset). Keeping it in one place is
+    /// what stops the paths from drifting apart, which is how `scale`,
+    /// `height` and `skipFullyTransparent` came to be ignored by some of them.
+    ///
+    /// - Parameters:
+    ///   - options: The render options to validate and apply.
+    ///   - resize: When true, the map is resized to `options.width` ×
+    ///     `options.height` for the duration of the call.
+    ///   - zoomIfUnset: When true, a map without a usable extent is zoomed to
+    ///     the layer extent first.
+    ///   - body: The render to perform.
+    /// - Returns: Whatever `body` returns.
+    private func withRenderState<T>(
+        _ options: RenderOptions,
+        resize: Bool,
+        zoomIfUnset: Bool = true,
+        body: () throws -> T,
+    ) throws -> T {
+        try options.validate()
+
+        let previousSize = size
+        if resize {
+            mapnik_map_resize(map, Int32(clamping: options.width), Int32(clamping: options.height))
+        }
+
+        let previousBuffer = applyBuffer(options.bufferSize)
+
+        defer {
+            if let previousBuffer {
+                setBufferSize(previousBuffer)
+            }
+
+            if resize {
+                mapnik_map_resize(map, Int32(clamping: previousSize.width), Int32(clamping: previousSize.height))
+            }
+        }
+
+        if zoomIfUnset {
+            zoomAllIfUnset()
+        }
+
+        return try body()
     }
 
     /// Applies an optional buffer override, returning the previous buffer
