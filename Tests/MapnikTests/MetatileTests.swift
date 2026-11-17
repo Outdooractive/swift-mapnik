@@ -409,10 +409,8 @@ struct MetatileTests {
             for tile in block.tiles {
                 #expect(plain.contains(tile), "tile \(tile) outside the bounding box")
             }
-            for tile in block.blockTiles {
-                if plain.contains(tile) {
-                    #expect(block.tiles.contains(tile))
-                }
+            for tile in block.blockTiles where plain.contains(tile) {
+                #expect(block.tiles.contains(tile))
             }
         }
     }

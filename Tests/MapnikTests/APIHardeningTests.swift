@@ -9,7 +9,7 @@ struct APIGapTests {
 
     /// tileCount counts unique tiles, matching the tilelist.
     @Test
-    func `tile count counts unique tiles`() {
+    func tileCountCountsUniqueTiles() {
         let builder = TilelistBuilder()
         builder.add(MapTile(x: 1, y: 2, z: 3))
         builder.add(MapTile(x: 1, y: 2, z: 3))
@@ -21,7 +21,7 @@ struct APIGapTests {
 
     /// Vector renders honour a requested page size.
     @Test
-    func `vector renders honour page size`() throws {
+    func vectorRendersHonourPageSize() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
 
         let svg = try map.renderSVG(width: 400, height: 300)
@@ -35,7 +35,7 @@ struct APIGapTests {
 
     /// Vector renders without an explicit size use the map's current size.
     @Test
-    func `vector renders default to map size`() throws {
+    func vectorRendersDefaultToMapSize() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
         let svg = try map.renderSVG()
         let text = String(decoding: svg, as: UTF8.self)
@@ -44,7 +44,7 @@ struct APIGapTests {
 
     /// ImageFormat's mapnik type string is observable.
     @Test
-    func `image format exposes type string`() {
+    func imageFormatExposesTypeString() {
         #expect(ImageFormat.png().typeString == "png")
         #expect(ImageFormat.png(colors: 64).typeString == "png:c=64")
         #expect(ImageFormat.png256.typeString == "png256")
