@@ -287,7 +287,7 @@ struct DatasourceLifetimeTests {
 
     /// Datasources can be created, queried and destroyed concurrently.
     @Test
-    func `concurrent datasource lifecycle is safe`() async throws {
+    func concurrentDatasourceLifecycleIsSafe() async throws {
         try await withThrowingTaskGroup(of: Void.self) { group in
             for _ in 0 ..< 8 {
                 group.addTask {
@@ -306,7 +306,7 @@ struct DatasourceLifetimeTests {
 
     /// A map keeps working after the counting datasource handle is destroyed.
     @Test
-    func `map outlives counting datasource handle`() throws {
+    func mapOutlivesCountingDatasourceHandle() throws {
         let map = try Mapnik(xml: Fixtures.polygonStyle)
         let counter = try #require(mapnik_counting_datasource_create())
         defer { mapnik_counting_datasource_destroy(counter) }

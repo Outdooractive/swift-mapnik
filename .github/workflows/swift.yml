@@ -21,7 +21,7 @@ jobs:
     - name: Install SwiftFormat
       run: |
         curl -fsSL -o /tmp/swiftformat.zip \
-          https://github.com/nicklockwood/SwiftFormat/releases/download/0.64.5/swiftformat_linux.zip
+          https://github.com/nicklockwood/SwiftFormat/releases/download/0.64.6/swiftformat_linux.zip
         unzip -q /tmp/swiftformat.zip -d /tmp/swiftformat
         install -m 0755 /tmp/swiftformat/swiftformat_linux /usr/local/bin/swiftformat
         swiftformat --version
